@@ -20,7 +20,6 @@ Activate Azure Stack: final step in connecting Azure Stack to be able to call ou
 
 .PARAMETER azureSubscriptionId
 
-
 Azure subscription ID that you want to register your Azure Stack with. This parameter is mandatory.
 
 .PARAMETER azureDirectoryTenantName
@@ -42,6 +41,14 @@ Environment name for use in retrieving tenant details and running several of the
 .PARAMETER azureResourceManagerEndpoint
 
 URI used for ActivateBridge.ps1 that refers to the endpoint for Azure Resource Manager. Defaults to "https://management.azure.com"
+
+.PARAMETER enableSyndication
+
+Switch ($true/$false) whether to enable downloading items from the Azure marketplace on this environment. Defaults to $true.
+
+.PARAMETER reportUsage
+
+Switch ($true/$false) whether to enable pushing usage data to Azure on this environment. Defaults to $false.
 
 .EXAMPLE
 
@@ -150,6 +157,43 @@ Write-Verbose "New registration request completed"
 New-Item -ItemType Directory -Force -Path "C:\temp"
 $registrationRequestFile = "c:\temp\registration.json"
 $registrationOutputFile = "c:\temp\registrationOutput.json"
+
+# Ensure subscription is registered to Microsoft.AzureStack namespace in Azure
+
+if($azureCredential){
+    Add-AzureRmAccount -Credential $azureCredential
+}
+else{
+    Add-AzureRmAccount 
+}
+
+Select-AzureRmSubscription -SubscriptionId $azureSubscriptionId
+
+Register-AzureRmResourceProvider -ProviderNamespace 'microsoft.azurestack' -Force
+$result                        = $null
+$attempts                      = 0
+$maxAttempts                   = 20
+$delayInSecondsBetweenAttempts = 10
+
+do
+{
+    $attempts++
+    Write-Verbose "[CHECK] Checking for resource provider registration... (attempt $attempts of $maxAttempts)"
+    $result = $(Get-AzureRmResourceProvider -ProviderNamespace 'microsoft.azurestack')[0].RegistrationState -EQ 'Registered'
+    $result
+    if ((-not $result) -and ($attempts -lt $maxAttempts))
+    {
+        Write-Verbose "[DELAY] Attempt $attempts failed to see provider registration, delaying for $delayInSecondsBetweenAttempts seconds before retry"
+        Start-Sleep -Seconds $delayInSecondsBetweenAttempts
+    }
+}
+while ((-not $result) -and ($attempts -lt $maxAttempts))
+
+
+if (-not $result)
+{
+    throw New-Object System.InvalidOperationException("Azure Bridge Resource Provider was registered but did not become routable within the alloted time")
+}
 
 .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
                           -RefreshToken $refreshToken -AzureAccountId $azureAccountId -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
