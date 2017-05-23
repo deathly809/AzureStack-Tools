@@ -65,28 +65,23 @@ This script must be run from the Host machine of the POC.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$false)]
-    [PSCredential] $azureCredential,
+    [PSCredential] $AzureCredential,
 
     [Parameter(Mandatory=$true)]
-    [String] $azureAccountId,
+    [String] $AzureSubscriptionId,
 
     [Parameter(Mandatory=$true)]
-    [String] $azureSubscriptionId,
-
-    [Parameter(Mandatory=$true)]
-    [String] $azureDirectoryTenantName,
+    [String] $AzureDirectoryTenantName,
 
     [Parameter(Mandatory=$false)]
-    [String] $azureEnvironment = "AzureCloud",
+    [ValidateSet("AzureCloud", "AzureChinaCloud", "AzureUSGovernment", "AzureGermanCloud")]
+    [String] $AzureEnvironment = "AzureCloud",
 
     [Parameter(Mandatory=$false)]
-    [String] $azureResourceManagerEndpoint = "https://management.azure.com",
+    [Switch] $EnableSyndication = $true,
 
     [Parameter(Mandatory=$false)]
-    [Switch] $enableSyndication = $true,
-
-    [Parameter(Mandatory=$false)]
-    [Switch] $reportUsage = $false
+    [Switch] $ReportUsage = $false
 )
 
 #requires -Module AzureRM.Profile
@@ -138,7 +133,7 @@ $refreshToken = (ConvertTo-SecureString -string $tenantDetails["RefreshToken"] -
 # Step 1: Configure Bridge identity
 #
 
-.\Configure-BridgeIdentity.ps1 -RefreshToken $refreshToken -AzureAccountId $azureAccountId -AzureDirectoryTenantName $azureDirectoryTenantName -AzureEnvironment $azureEnvironment -Verbose
+.\Configure-BridgeIdentity.ps1 -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureDirectoryTenantName $azureDirectoryTenantName -AzureEnvironment $azureEnvironment -Verbose
 Write-Verbose "Configure Bridge identity completed"
 
 #
@@ -179,6 +174,8 @@ do
 {
     $attempts++
     Write-Verbose "[CHECK] Checking for resource provider registration... (attempt $attempts of $maxAttempts)"
+    $registrationState = $(Get-AzureRmResourceProvider -ProviderNamespace 'microsoft.azurestack')[0].RegistrationState
+    Write-Verbose "Registration State: $registrationState"
     $result = $(Get-AzureRmResourceProvider -ProviderNamespace 'microsoft.azurestack')[0].RegistrationState -EQ 'Registered'
     $result
     if ((-not $result) -and ($attempts -lt $maxAttempts))
@@ -196,7 +193,7 @@ if (-not $result)
 }
 
 .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
-                          -RefreshToken $refreshToken -AzureAccountId $azureAccountId -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
+                          -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
                           -RegistrationOutputFile $registrationOutputFile -Location "westcentralus" -Verbose
 Write-Verbose "Register Azure Stack with Azure completed"
 
@@ -225,6 +222,8 @@ Write-Verbose "Activation file is at : $activationDataFile"
 $regResponse = Get-Content -path  $activationDataFile
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($regResponse)
 $activationCode = [Convert]::ToBase64String($bytes)
+
+$azureResourceManagerEndpoint = (Get-AzureRmEnvironment $AzureEnvironment).ResourceManagerUrl
 
 .\Activate-Bridge.ps1 -activationCode $activationCode -AzureResourceManagerEndpoint $azureResourceManagerEndpoint -Verbose
 Write-Verbose "Azure Stack activation completed"
