@@ -176,7 +176,7 @@ do
     Write-Verbose "[CHECK] Checking for resource provider registration... (attempt $attempts of $maxAttempts)"
     $registrationState = $(Get-AzureRmResourceProvider -ProviderNamespace 'microsoft.azurestack')[0].RegistrationState
     Write-Verbose "Registration State: $registrationState"
-    $result = $(Get-AzureRmResourceProvider -ProviderNamespace 'microsoft.azurestack')[0].RegistrationState -EQ 'Registered'
+    $result = $registrationState -EQ 'Registered'
     $result
     if ((-not $result) -and ($attempts -lt $maxAttempts))
     {
