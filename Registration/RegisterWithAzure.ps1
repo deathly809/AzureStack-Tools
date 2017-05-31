@@ -56,8 +56,20 @@ This script must be run from the Host machine of the POC.
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory=$false, ParameterSetName="CredentialActivation")]
     [PSCredential] $AzureCredential,
+
+    [Parameter(Mandatory=$false, ParameterSetName="ServicePrincipalActivation",Position=0)]
+    [Switch] $UsingServicePrincipal,
+
+    [Parameter(Mandatory=$true, ParameterSetName="ServicePrincipalActivation",Position=1)]
+    [String] $CertificatePassword,
+
+    [Parameter(Mandatory=$true, ParameterSetName="ServicePrincipalActivation")]
+    [string] $CertFilePath,
+
+    [Parameter(Mandatory=$true, ParameterSetName="ServicePrincipalActivation")]
+    [String] $AppId,
 
     [Parameter(Mandatory=$true)]
     [String] $AzureSubscriptionId,
@@ -101,6 +113,14 @@ else
     Write-Verbose -Message "Running registration on build $($versionInfo.Version)" -Verbose
 }
 
+if ($UsingServicePrincipal)
+{
+    $password = (ConvertTo-SecureString -String $CertificatePassword -AsPlainText -Force)
+    $cert = Import-PfxCertificate -Password $password -FilePath $CertFilePath -CertStoreLocation Cert:\LocalMachine\my -Verbose -ErrorAction Stop
+    $clientId = $AppId
+}
+
+
 #
 # Obtain refresh token for Azure identity
 #
@@ -108,25 +128,36 @@ else
 Import-Module C:\CloudDeployment\Setup\Common\AzureADConfiguration.psm1 -ErrorAction Stop
 $AzureDirectoryTenantId = Get-TenantIdFromName -azureEnvironment $azureEnvironment -tenantName $azureDirectoryTenantName
 
-if(-not $azureCredential)
-{
-    Write-Verbose "Prompt user to enter Azure Credentials to get refresh token"
-    $tenantDetails = Get-AzureADTenantDetails -AzureEnvironment $azureEnvironment -AADDirectoryTenantName $azureDirectoryTenantName
-}
-else
-{
-    Write-Verbose "Using provided Azure Credentials to get refresh token"
-    $tenantDetails = Get-AzureADTenantDetails -AzureEnvironment $azureEnvironment -AADDirectoryTenantName $azureDirectoryTenantName -AADAdminCredential $azureCredential
-}
+if(-not $UsingServicePrincipal){
 
-$refreshToken = (ConvertTo-SecureString -string $tenantDetails["RefreshToken"] -AsPlainText -Force)
+    if(-not $azureCredential)
+    {
+        Write-Verbose "Prompt user to enter Azure Credentials to get refresh token"
+        $tenantDetails = Get-AzureADTenantDetails -AzureEnvironment $azureEnvironment -AADDirectoryTenantName $azureDirectoryTenantName
+    }
+    else
+    {
+        Write-Verbose "Using provided Azure Credentials to get refresh token"
+        $tenantDetails = Get-AzureADTenantDetails -AzureEnvironment $azureEnvironment -AADDirectoryTenantName $azureDirectoryTenantName -AADAdminCredential $azureCredential
+    }
+
+    $refreshToken = (ConvertTo-SecureString -string $tenantDetails["RefreshToken"] -AsPlainText -Force)
+}
 
 #
 # Step 1: Configure Bridge identity
 #
 
-.\Configure-BridgeIdentity.ps1 -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureDirectoryTenantName $azureDirectoryTenantName -AzureEnvironment $azureEnvironment -Verbose
-Write-Verbose "Configure Bridge identity completed"
+if ($UsingServicePrincipal)
+{
+    .\Configure-BridgeIdentity.ps1 -ClientId $clientId -ClientCertThumbprint $cert.Thumbprint -AzureDirectoryTenantName $AzureDirectoryTenantName -AzureEnvironment $AzureEnvironment -ServicePrincipal -Verbose
+    Write-Verbose "Configure Bridge identity completed with service principal"
+}
+else
+{
+    .\Configure-BridgeIdentity.ps1 -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureDirectoryTenantName $azureDirectoryTenantName -AzureEnvironment $azureEnvironment -Verbose
+    Write-Verbose "Configure Bridge identity completed with refresh token"
+}
 
 #
 # Step 2: Create new registration request
@@ -141,14 +172,27 @@ Write-Verbose "New registration request completed"
 # Step 3: Register Azure Stack with Azure
 #
 
+Disable-AzureRmDataCollection
 New-Item -ItemType Directory -Force -Path "C:\temp"
 $registrationRequestFile = "c:\temp\registration.json"
 $registrationOutputFile = "c:\temp\registrationOutput.json"
 
-.\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
-                          -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
-                          -RegistrationOutputFile $registrationOutputFile -Location "westcentralus" -Verbose
-Write-Verbose "Register Azure Stack with Azure completed"
+if ($UsingServicePrincipal)
+{
+    Login-AzureRmAccount -EnvironmentName $AzureEnvironment -ServicePrincipal -CertificateThumbprint $cert.Thumbprint -ApplicationId $appId  -TenantId $AzureDirectoryTenantId -Verbose
+
+    .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $AzureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
+        -ClientCert $cert -ClientId $appId  -AzureEnvironmentName $AzureEnvironment -RegistrationRequestFile $registrationRequestFile -RegistrationOutputFile $registrationOutputFile `
+        -Location "westcentralus" -ServicePrincipal -Verbose
+    Write-Verbose "Register Azure Stack with Azure completed with service principal"
+}
+else
+{
+    .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
+                                -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
+                                -RegistrationOutputFile $registrationOutputFile -Location "westcentralus" -Verbose
+    Write-Verbose "Register Azure Stack with Azure completed with refresh token"
+}    
 
 #
 # workaround to enable syndication and usage
