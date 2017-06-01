@@ -82,10 +82,10 @@ param(
     [String] $AzureEnvironment = "AzureCloud",
 
     [Parameter(Mandatory=$false)]
-    [Switch] $EnableSyndication = $true,
+    [Switch] $EnableMarketplace = $true,
 
     [Parameter(Mandatory=$false)]
-    [Switch] $ReportUsage = $false
+    [Switch] $EnableUsage = $false
 )
 
 #requires -Module AzureRM.Profile
@@ -181,46 +181,25 @@ if ($UsingServicePrincipal)
 {
     Login-AzureRmAccount -EnvironmentName $AzureEnvironment -ServicePrincipal -CertificateThumbprint $cert.Thumbprint -ApplicationId $appId  -TenantId $AzureDirectoryTenantId -Verbose
 
-    .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $AzureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
+    .\Register-AzureStack.ps1 -BillingModel Development -EnableMarketplace:$EnableMarketplace -EnableUsage:$EnableUsage -SubscriptionId $AzureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
         -ClientCert $cert -ClientId $appId  -AzureEnvironmentName $AzureEnvironment -RegistrationRequestFile $registrationRequestFile -RegistrationOutputFile $registrationOutputFile `
         -Location "westcentralus" -ServicePrincipal -Verbose
     Write-Verbose "Register Azure Stack with Azure completed with service principal"
 }
 else
 {
-    .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
+    .\Register-AzureStack.ps1 -BillingModel Development -EnableMarketplace:$EnableMarketplace -EnableUsage:$EnableUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
                                 -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
                                 -RegistrationOutputFile $registrationOutputFile -Location "westcentralus" -Verbose
     Write-Verbose "Register Azure Stack with Azure completed with refresh token"
 }    
 
 #
-# workaround to enable syndication and usage
+# Step 4: Activate AzureStack
 #
 
-$activationDataFile = "c:\temp\regOutput2.json"
-$reg = Get-Content $registrationOutputFile | ConvertFrom-Json
-
-$newProps = @{
-    ObjectId          = $reg.properties.ObjectId
-    ProvisioningState = $reg.properties.provisioningState
-    enablesyndication = $enableSyndication
-    reportusage       = $reportUsage
-}
-
-$reg.properties = $newProps
-$reg | ConvertTo-Json -Depth 4 | Out-File -FilePath $activationDataFile
-
-Write-Verbose "Activation file is at : $activationDataFile"
-
-#
-# Step 4: Activate Azure Stack
-#
-$regResponse = Get-Content -path  $activationDataFile
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($regResponse)
-$activationCode = [Convert]::ToBase64String($bytes)
-
+$activationCode = Get-Content $registrationOutputFile
 $azureResourceManagerEndpoint = (Get-AzureRmEnvironment $AzureEnvironment).ResourceManagerUrl
 
-.\Activate-Bridge.ps1 -activationCode $activationCode -AzureResourceManagerEndpoint $azureResourceManagerEndpoint -Verbose
+.\Activate-AzureStack.ps1 -activationCode $activationCode -AzureResourceManagerEndpoint $azureResourceManagerEndpoint -SubscriptionId $AzureSubscriptionId -Verbose
 Write-Verbose "Azure Stack activation completed"
