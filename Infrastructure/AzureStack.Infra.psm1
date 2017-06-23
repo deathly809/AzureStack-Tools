@@ -10,20 +10,19 @@
     List Active & Closed Infrastructure Alerts
 #>
 Function Get-AzSAlert{
-    [CmdletBinding()]
-    Param(
-
-        [Parameter(Mandatory=$true)]
+    [CmdletBinding(DefaultParameterSetName='GetAlert')]
+    Param(    
+        [Parameter(Mandatory=$true, ParameterSetName='GetAlert')]
         [ValidateNotNullorEmpty()]
         [String] $tenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(ParameterSetName='GetAlert')]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
         
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetAlert')]
         [string] $EnvironmentName,
         
+        [Parameter(ParameterSetName='GetAlert')]
         [string] $region = 'local'
 
     )
@@ -42,22 +41,21 @@ export-modulemember -function Get-AzSAlert
     List Azure Stack Scale Units in specified Region
 #>
 Function Get-AzSScaleUnit{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='ScaleUnit')]
     Param(
-
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='ScaleUnit')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,  
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='ScaleUnit')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
         
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='ScaleUnit')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='ScaleUnit')]
         [string] $region = 'local'
-
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
     $subscription, $headers =  (Get-AzureStackAdminSubTokenHeader -TenantId $tenantId -AzureStackCredentials $azureStackCredentials -EnvironmentName $EnvironmentName)   
@@ -73,20 +71,21 @@ export-modulemember -function Get-AzSScaleUnit
     List Nodes in Scale Unit 
 #>
 Function Get-AzSScaleUnitNode{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetNode')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetNode')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetNode')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetNode')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetNode')]
         [string] $region = 'local'
 
     )
@@ -104,23 +103,25 @@ export-modulemember -function Get-AzSScaleUnitNode
     .SYNOPSIS
     List total storage capacity 
 #>
-Function Get-AzSStorageCapacity{
-    [CmdletBinding()]
+Function Get-AzSStorageSubsystem{
+    [CmdletBinding(DefaultParameterSetName='GetStorageCapacity')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetStorageSubsystem')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetStorageSubsystem')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetStorageSubsystem')]
+
         [string] $EnvironmentName,
 
-        [string] $region = 'local'
 
+        [Parameter(ParameterSetName='GetStorageSubsystem')]
+        [string] $region = 'local'
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
@@ -132,29 +133,29 @@ Function Get-AzSStorageCapacity{
     $storageprop|select name,location,properties
     
 }
-export-modulemember -function Get-AzSStorageCapacity
+export-modulemember -function Get-AzSStorageSubsystem
 
 <#
     .SYNOPSIS
     List Infrastructure Roles 
 #>
 Function Get-AzSInfraRole{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetInfraRole')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetInfraRole')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetInfraRole')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetInfraRole')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetInfraRole')]
         [string] $region = 'local'
-
     )
 
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
@@ -162,7 +163,7 @@ Function Get-AzSInfraRole{
     $subscription, $headers =  (Get-AzureStackAdminSubTokenHeader -TenantId $tenantId -AzureStackCredentials $azureStackCredentials -EnvironmentName $EnvironmentName)
     $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.Fabric.Admin/fabricLocations/$region/InfraRoles?api-version=2016-05-01"
     $Roles=Invoke-RestMethod -Method GET -Uri $uri -ContentType 'application/json' -Headers $Headers
-    $roles.value
+    $roles.value|select name,properties
     
 }      
 export-modulemember -function Get-AzSInfraRole
@@ -173,22 +174,22 @@ export-modulemember -function Get-AzSInfraRole
 #>
 
 Function Get-AzSInfraRoleInstance{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetInfraRoleInstance')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetInfraRoleInstance')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetInfraRoleInstance')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetInfraRoleInstance')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetInfraRoleInstance')]
         [string] $region = 'local'
-
     )
 
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
@@ -206,22 +207,22 @@ export-modulemember -function Get-AzSInfraRoleInstance
     List File Shares
 #>
 Function Get-AzSStorageShare{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetShare')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetShare')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetShare')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetShare')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetShare')]
         [string] $region = 'local'
-
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
@@ -239,22 +240,22 @@ export-modulemember -function Get-AzSStorageShare
     List Logical Networks
 #>
 Function Get-AzSLogicalNetwork{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='Getlogicalnetwork')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='Getlogicalnetwork')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='Getlogicalnetwork')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='Getlogicalnetwork')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='Getlogicalnetwork')]
         [string] $region = 'local'
-
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
@@ -271,56 +272,57 @@ export-modulemember -function Get-AzSLogicalNetwork
     .SYNOPSIS
     List Region Update Summary
 #>
-Function Get-AzSUpdateSummary{
-    [CmdletBinding()]
+Function Get-AzSUpdateLocation{
+    [CmdletBinding(DefaultParameterSetName='GetUpdateLocation')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetUpdateLocation')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetUpdateLocation')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetUpdateLocation')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetUpdateLocation')]
         [string] $region = 'local'
-
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
     $subscription, $headers =  (Get-AzureStackAdminSubTokenHeader -TenantId $tenantId -AzureStackCredentials $azureStackCredentials -EnvironmentName $EnvironmentName)
-    $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.Update.Admin/updatelocations/$region/regionUpdateStatus?api-version=2016-05-01"
-    $USummary=Invoke-RestMethod -Method GET -Uri $uri -ContentType 'application/json' -Headers $Headers
-    $USummaryprop=$USummary.value
-    $USummaryprop.properties|select locationName,currentversion,lastUpdated,lastChecked,state
+    $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.Update.Admin/updatelocations?api-version=2016-05-01"
+    $ULocation=Invoke-RestMethod -Method GET -Uri $uri -ContentType 'application/json' -Headers $Headers
+    $ULocationprop=$ULocation.value
+    $ULocationprop
     
 }
-export-modulemember -function Get-AzSUpdateSummary
+export-modulemember -function Get-AzSUpdateLocation
 
 <#
     .SYNOPSIS
     List Available Updates
 #>
 Function Get-AzSUpdate{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetUpdate')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetUpdate')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetUpdate')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetUpdate')]
         [string] $EnvironmentName,
 
-        [string] $region = 'local'
 
+        [Parameter(ParameterSetName='GetUpdate')]
+        [string] $region = 'local'
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
@@ -338,26 +340,27 @@ export-modulemember -function Get-AzSUpdate
     List Status for a specific Update Run
 #>
 Function Get-AzSUpdateRun{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetUpdateRun')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetUpdateRun')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetUpdateRun')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetUpdateRun')]
         [string] $EnvironmentName,
 
+
+        [Parameter(ParameterSetName='GetUpdateRun')]
         [string] $region = 'local',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetUpdateRun')]
         [ValidateNotNullorEmpty()]
         [String] $vupdate
-
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
@@ -375,26 +378,27 @@ export-modulemember -function Get-AzSUpdateRun
     Apply Azure Stack Update 
 #>
 Function Install-AzSUpdate{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='ApplyUpdate')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='ApplyUpdate')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='ApplyUpdate')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='ApplyUpdate')]
         [string] $EnvironmentName,
 
+
+        [Parameter(ParameterSetName='ApplyUpdate')]
         [string] $region = 'local',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='ApplyUpdate')]
         [ValidateNotNullorEmpty()]
         [String] $vupdate
-
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
@@ -404,8 +408,8 @@ Function Install-AzSUpdate{
     $Updateprop=$Updates.value
     $Update=$updateprop |where-object {$_.name -eq "$vupdate"}
     $StartUpdateBody = $update | ConvertTo-Json
-    $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.Update.Admin/updatelocations/$region/updates/$vupdate ?api-version=2016-05-01"
-    $Runs=Invoke-RestMethod -Method PUT -Uri $uri -ContentType 'application/json' -Headers $Headers -Body $StartUpdateBody
+    $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.Update.Admin/updatelocations/$region/updates/$vupdate/apply?api-version=2016-05-01"
+    $Runs=Invoke-RestMethod -Method POST -Uri $uri -ContentType 'application/json' -Headers $Headers -Body $StartUpdateBody
     $Startrun=$Runs.value
     $Startrun   
     
@@ -417,27 +421,26 @@ export-modulemember -function Install-AzSUpdate
     Close Active Alert
 #>
 Function Close-AzSAlert{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='closealert')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='closealert')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='closealert')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='closealert')]
         [string] $EnvironmentName,
 
-        [Parameter(Mandatory=$false)]
+        [Parameter(ParameterSetName='closealert')]
         [string] $region = 'local',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='closealert')]
         [ValidateNotNullorEmpty()]
         [String] $alertid
-
     )
     $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
 
@@ -449,7 +452,6 @@ Function Close-AzSAlert{
     $Alerts.properties.state = "Closed"
     $AlertUpdateBody = $Alerts | ConvertTo-Json
     $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.InfrastructureInsights.Admin/regionHealths/$region/Alerts/${alertname}?api-version=2016-05-01"
-    $URI
     $Close=Invoke-RestMethod -Method PUT -Uri $uri -ContentType 'application/json' -Headers $Headers -Body $AlertUpdateBody
     $CloseRun=$Close.value
     $closeRun 
@@ -463,20 +465,21 @@ export-modulemember -function Close-AzSAlert
     List IP Address Pools
 #>
 Function Get-AzSIPPool{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetIPPool')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetIPPool')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetIPPool')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetIPPool')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetIPPool')]
         [string] $region = 'local'
 
     )
@@ -496,20 +499,21 @@ export-modulemember -function Get-AzSIPPool
     List MAC Address Pools
 #>
 Function Get-AzSMaCPool{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetMaCPool')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetMaCPool')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetMaCPool')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetMaCPool')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetMaCPool')]
         [string] $region = 'local'
 
     )
@@ -529,20 +533,21 @@ export-modulemember -function Get-AzSMaCPool
 #>
 
 Function Get-AzSGatewayPool{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetGatewayPool')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetGatewayPool')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetGatewayPool')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetGatewayPool')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetGatewayPool')]
         [string] $region = 'local'
 
     )
@@ -563,20 +568,21 @@ export-modulemember -function Get-AzSGatewayPool
 
 
 Function Get-AzSSLBMUX{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetSLBMUX')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetSLBMUX')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetSLBMUX')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetSLBMUX')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetSLBMUX')]
         [string] $region = 'local'
 
     )
@@ -596,20 +602,21 @@ export-modulemember -function Get-AzSSLBMUX
 #>
 
 Function Get-AzSGateway{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='GetGateway')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='GetGateway')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='GetGateway')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetGateway')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='GetGateway')]
         [string] $region = 'local'
 
     )
@@ -630,23 +637,24 @@ export-modulemember -function Get-AzSGateway
 #>
 
 Function Start-AzSInfraRoleInstance{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='StartInfraRoleInstance')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='StartInfraRoleInstance')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='StartInfraRoleInstance')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='StartInfraRoleInstance')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='StartInfraRoleInstance')]
         [string] $region = 'local',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true,ParameterSetName='StartInfraRoleInstance')]
         [string] $Name
 
     )
@@ -666,23 +674,24 @@ export-modulemember -function Start-AzSInfraRoleInstance
 #>
 
 Function Stop-AzSInfraRoleInstance{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='StopInfraRoleInstance')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='StopInfraRoleInstance')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='StopInfraRoleInstance')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='StopInfraRoleInstance')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='StopInfraRoleInstance')]
         [string] $region = 'local',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true,ParameterSetName='StopInfraRoleInstance')]
         [string] $Name
 
     )
@@ -702,23 +711,24 @@ export-modulemember -function Stop-AzSInfraRoleInstance
 #>
 
 Function Restart-AzSInfraRoleInstance{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='RestartInfraRoleInstance')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='RestartInfraRoleInstance')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='RestartInfraRoleInstance')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='RestartInfraRoleInstance')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='RestartInfraRoleInstance')]
         [string] $region = 'local',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='RestartInfraRoleInstance')]
         [string] $Name
 
     )
@@ -738,32 +748,33 @@ export-modulemember -function Restart-AzSInfraRoleInstance
 #>
 
 Function Add-AzSIPPool{
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='AddIPPool')]
     Param(
     
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ParameterSetName='AddIPPool')]
         [ValidateNotNullorEmpty()]
         [String] $TenantId,
         
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
+        [Parameter(Mandatory=$true, ParameterSetName='AddIPPool')]
+        [ValidateNotNullorEmpty()]
         [System.Management.Automation.PSCredential] $azureStackCredentials,
 	
-        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name")]
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='AddIPPool')]
         [string] $EnvironmentName,
 
+        [Parameter(ParameterSetName='AddIPPool')]
         [string] $region = 'local',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true,ParameterSetName='AddIPPool')]
         [string] $Name,
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true,ParameterSetName='AddIPPool')]
         [string] $StartIPAddress = '',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true,ParameterSetName='AddIPPool')]
         [string] $EndIPAddress = '',
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true,ParameterSetName='AddIPPool')]
         [string] $AddressPrefix = ''
 
     )
@@ -786,6 +797,122 @@ $IPPoolBodyJson =$IPPoolBody |ConvertTo-Json
 
 }
 export-modulemember -function Add-AzSIPPool
+
+
+<#
+    .SYNOPSIS
+    Enable Maintenance Mode
+#>
+
+Function Disable-AzSScaleUnitNode{
+    [CmdletBinding(DefaultParameterSetName='DisableAzSScaleUnitNode')]
+    Param(
+    
+        [Parameter(Mandatory=$true, ParameterSetName='DisableAzSScaleUnitNode')]
+        [ValidateNotNullorEmpty()]
+        [String] $TenantId,
+        
+        [Parameter(Mandatory=$true, ParameterSetName='DisableAzSScaleUnitNode')]
+        [ValidateNotNullorEmpty()]
+        [System.Management.Automation.PSCredential] $azureStackCredentials,
+
+        [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='DisableAzSScaleUnitNode')]
+        [string] $EnvironmentName,
+
+        [Parameter(ParameterSetName='DisableAzSScaleUnitNode')]
+        [string] $region = 'local',
+
+        [Parameter(Mandatory=$true, ParameterSetName='DisableAzSScaleUnitNode')]
+        [string] $Name
+
+    )
+    $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
+ 
+    $subscription, $headers =  (Get-AzureStackAdminSubTokenHeader -TenantId $tenantId -AzureStackCredentials $azureStackCredentials -EnvironmentName $EnvironmentName)
+    $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.Fabric.Admin/fabricLocations/$region/scaleunitnodes/$name/StartMaintenanceMode?api-version=2016-05-01"      
+    $Drain=Invoke-RestMethod -Method Post -Uri $uri -ContentType 'application/json' -Headers $Headers
+    $Drain
+   
+}
+export-modulemember -function Disable-AzSScaleUnitNode
+
+
+<#
+    .SYNOPSIS
+    Enable Maintenance Mode
+#>
+
+Function Enable-AzSScaleUnitNode{
+    [CmdletBinding(DefaultParameterSetName='EnableAzSScaleUnitNode')]
+    Param(
+    
+        [Parameter(Mandatory=$true, ParameterSetName='EnableAzSScaleUnitNode')]
+        [ValidateNotNullorEmpty()]
+        [String] $TenantId,
+        
+        [Parameter(Mandatory=$true, ParameterSetName='EnableAzSScaleUnitNode')]
+        [ValidateNotNullorEmpty()]
+        [System.Management.Automation.PSCredential] $azureStackCredentials,
+
+	    [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='EnableAzSScaleUnitNode')]
+        [string] $EnvironmentName,
+
+        [Parameter(ParameterSetName='EnableAzSScaleUnitNode')]
+        [string] $region = 'local',
+
+        [Parameter(Mandatory=$true, ParameterSetName='EnableAzSScaleUnitNode')]
+        [string] $Name
+
+    )
+    $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
+   
+    $subscription, $headers =  (Get-AzureStackAdminSubTokenHeader -TenantId $tenantId -AzureStackCredentials $azureStackCredentials -EnvironmentName $EnvironmentName)
+    $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.Fabric.Admin/fabricLocations/$region/scaleunitnodes/$name/StopMaintenanceMode?api-version=2016-05-01"      
+    $Resume=Invoke-RestMethod -Method Post -Uri $uri -ContentType 'application/json' -Headers $Headers
+    $Resume
+    
+}
+export-modulemember -function Enable-AzSScaleUnitNode
+
+
+<#
+    .SYNOPSIS
+    Get Region Capacity
+#>
+
+Function Get-AzSRegionCapacity{
+    [CmdletBinding(DefaultParameterSetName='GetRegionCapacity')]
+    Param(
+    
+        [Parameter(Mandatory=$true, ParameterSetName='GetRegionCapacity')]
+        [ValidateNotNullorEmpty()]
+        [String] $TenantId,
+        
+        [Parameter(Mandatory=$true, ParameterSetName='GetRegionCapacity')]
+        [ValidateNotNullorEmpty()]
+        [System.Management.Automation.PSCredential] $azureStackCredentials,
+
+	    [Parameter(Mandatory=$true, HelpMessage="The Azure Stack Administrator Environment Name", ParameterSetName='GetRegionCapacity')]
+        [string] $EnvironmentName,
+
+        [Parameter(ParameterSetName='GetRegionCapacity')]
+        [string] $region = 'local'
+
+        
+
+    )
+    $ARMEndpoint = GetARMEndpoint -EnvironmentName $EnvironmentName -ErrorAction Stop
+   
+    $subscription, $headers =  (Get-AzureStackAdminSubTokenHeader -TenantId $tenantId -AzureStackCredentials $azureStackCredentials -EnvironmentName $EnvironmentName)
+    $URI= "${ArmEndpoint}/subscriptions/${subscription}/resourceGroups/system.$region/providers/Microsoft.InfrastructureInsights.Admin/regionHealths?api-version=2016-05-01"
+    $Capacity=Invoke-RestMethod -Method GET -Uri $uri -ContentType 'application/json' -Headers $Headers
+    $RCapacity=$Capacity.value
+    $RCapacity| select name,properties
+
+    
+}
+export-modulemember -function Get-AzSRegionCapacity
+
 
 Function Set-AzSLocationInformation {
     Param(    

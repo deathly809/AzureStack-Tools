@@ -54,6 +54,7 @@ This script must be run from the Host machine of the POC.
  Register-AzureRmResourceProvider -ProviderNamespace 'microsoft.azurestack' 
 #>
 
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$false, ParameterSetName="CredentialActivation")]
@@ -165,6 +166,8 @@ else
 
 $bridgeAppConfigFile = "\\SU1FileServer\SU1_Infrastructure_1\ASResourceProvider\Config\AzureBridge.IdentityApplication.Configuration.json"
 $registrationOutputFile = "c:\temp\registration.json"
+
+Write-Verbose "Calling New-RegistrationRequest.ps1"
 .\New-RegistrationRequest.ps1 -BridgeAppConfigFile $bridgeAppConfigFile -RegistrationRequestOutputFile $registrationOutputFile -Verbose
 Write-Verbose "New registration request completed"
 
@@ -176,6 +179,11 @@ Disable-AzureRmDataCollection
 New-Item -ItemType Directory -Force -Path "C:\temp"
 $registrationRequestFile = "c:\temp\registration.json"
 $registrationOutputFile = "c:\temp\registrationOutput.json"
+
+$timestamp = [DateTime]::Now.ToString("yyyyMMdd-HHmmss")
+$logPath = (New-Item -Path "$env:SystemDrive\CloudDeployment\Logs\" -ItemType Directory -Force).FullName
+$logFile = Join-Path -Path $logPath -ChildPath "Register-AzureStack.${timestamp}.txt"
+try { Start-Transcript -Path $logFile -Force | Out-String | Write-Verbose -Verbose } catch { Write-Warning -Message $_.Exception.Message }
 
 if ($UsingServicePrincipal)
 {
@@ -192,7 +200,8 @@ else
                                 -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
                                 -RegistrationOutputFile $registrationOutputFile -Location "westcentralus" -Verbose
     Write-Verbose "Register Azure Stack with Azure completed with refresh token"
-}    
+}
+try { Stop-Transcript -Verbose } catch { Write-Warning "$_" }    
 
 #
 # workaround to enable syndication and usage
@@ -220,7 +229,22 @@ $regResponse = Get-Content -path  $activationDataFile
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($regResponse)
 $activationCode = [Convert]::ToBase64String($bytes)
 
-$azureResourceManagerEndpoint = (Get-AzureRmEnvironment $AzureEnvironment).ResourceManagerUrl
+try
+{
+    .\Activate-Bridge.ps1 -activationCode $activationCode -AzureResourceManagerEndpoint $azureResourceManagerEndpoint -Verbose
+}
+catch
+{
+    $exceptionMessage = $_.Exception.Message
 
-.\Activate-Bridge.ps1 -activationCode $activationCode -AzureResourceManagerEndpoint $azureResourceManagerEndpoint -Verbose
+    if($exceptionMessage.Contains("Application is currently being upgraded"))
+    {
+        Write-Warning "Activate-Bridge: Known issue with redundant service fabric upgrade call" 
+    }
+    else
+    {
+        Write-Error -Message "Activate-Bridge: Error : $($_.Exception)"
+    }
+}
+
 Write-Verbose "Azure Stack activation completed"

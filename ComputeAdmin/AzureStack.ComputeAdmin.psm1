@@ -3,15 +3,36 @@
 
 #requires -Modules AzureStack.Connect
 
+<#
+    .SYNOPSIS
+    Add-AzureStackVMSSGalleryItem: Adds the VMSS Gallery Item to your Azure Stack Marketplace.
+    Remove-AzureStackVMSSGalleryItem: Adds the VMSS Gallery Item from your Azure Stack Marketplace.
+    Add-VMImage: Uploads a VM Image to your Azure Stack and creates a Marketplace item for it.
+    Remove-VMImage: Removes an existing VM Image from your Azure Stack.  Does not delete any 
+    maketplace items created by Add-VMImage.
+    New-Server2016VMImage: Creates and Uploads a new Server 2016 Core and / or Full Image and
+    creates a Marketplace item for it.
+    Get-VMImage: Gets a VM Image from your Azure Stack as an Administrator to view the provisioning state of the image.
+    Add-VMExtension: Uploads a VM extension to your Azure Stack.
+    Remove-VMExtension: Removes an existing VM extension from your Azure Stack.
+#>
+
 function Add-AzureStackVMSSGalleryItem {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$false)]
+        [ValidatePattern("^[0-9a-zA-Z]+$")]
+        [ValidateLength(1,128)]
+        [String] $Location = 'local'
+    )
 
     $rgName = "vmss.gallery"
 
-    New-AzureRmResourceGroup -Name $rgName -Location local -Force
+    New-AzureRmResourceGroup -Name $rgName -Location $Location -Force
 
     $saName = "vmssgallery"
 
-    $sa = New-AzureRmStorageAccount -ResourceGroupName $rgName -Location local -Name $saName -Type Standard_LRS
+    $sa = New-AzureRmStorageAccount -ResourceGroupName $rgName -Location $Location -Name $saName -Type Standard_LRS
 
     $cName = "gallery"
 
@@ -23,9 +44,8 @@ function Add-AzureStackVMSSGalleryItem {
     }
     
     $fileName = "microsoft.vmss.1.3.6.azpkg"
-    $basePath = (Get-Module AzureStack.ComputeAdmin).ModuleBase
 
-    $blob = Set-AzureStorageBlobContent –File ($basePath + "\" + $fileName) –Blob $fileName -Container $cName -Force
+    $blob = Set-AzureStorageBlobContent –File ($PSScriptRoot + "\" + $fileName) –Blob $fileName -Container $cName -Force
     $container = Get-AzureStorageContainer -Name $cName -ErrorAction SilentlyContinue
 
     $uri = $blob.Context.BlobEndPoint + $container.Name + "/" + $blob.Name    
@@ -40,19 +60,6 @@ function Remove-AzureStackVMSSGalleryItem {
         $item
     }
 }
-
-<#
-    .SYNOPSIS
-    Contains 6 functions.
-    Add-VMImage: Uploads a VM Image to your Azure Stack and creates a Marketplace item for it.
-    Remove-VMImage: Removes an existing VM Image from your Azure Stack.  Does not delete any 
-    maketplace items created by Add-VMImage.
-    New-Server2016VMImage: Creates and Uploads a new Server 2016 Core and / or Full Image and
-    creates a Marketplace item for it.
-    Get-VMImage: Gets a VM Image from your Azure Stack as an Administrator to view the provisioning state of the image.
-    Add-VMExtension: Uploads a VM extension to your Azure Stack.
-    Remove-VMExtension: Removes an existing VM extension from your Azure Stack.
-#>
 
 Function Add-VMImage{
 
@@ -671,7 +678,7 @@ Function CreateGalleyItem{
         [string] $title,
         [string] $description
     )
-    $workdir = '{0}\{1}' -f $env:TEMP, [System.Guid]::NewGuid().ToString()
+    $workdir = '{0}{1}' -f [System.IO.Path]::GetTempPath(), [System.Guid]::NewGuid().ToString() 
     New-Item $workdir -ItemType Directory | Out-Null
     $basePath = (Get-Module AzureStack.ComputeAdmin).ModuleBase
     $compressedGalleryItemPath = Join-Path $basePath 'CustomizedVMGalleryItem.azpkg'
