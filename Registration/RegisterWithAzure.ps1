@@ -228,6 +228,7 @@ Write-Verbose "Activation file is at : $activationDataFile"
 $regResponse = Get-Content -path  $activationDataFile
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($regResponse)
 $activationCode = [Convert]::ToBase64String($bytes)
+$azureResourceManagerEndpoint = (Get-AzureRmEnvironment $AzureEnvironment).ResourceManagerUrl
 
 try
 {
