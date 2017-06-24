@@ -111,11 +111,12 @@ if($versionInfo.Version -lt $minVersion)
 }
 else
 {
-    Write-Verbose -Message "Running registration on build $($versionInfo.Version)" -Verbose
+    Write-Verbose -Message "Running registration on build $($versionInfo.Version)"
 }
 
 if ($UsingServicePrincipal)
 {
+    Write-Verbose "Using service principal to register with Azure"
     $password = (ConvertTo-SecureString -String $CertificatePassword -AsPlainText -Force)
     $cert = Import-PfxCertificate -Password $password -FilePath $CertFilePath -CertStoreLocation Cert:\LocalMachine\my -Verbose -ErrorAction Stop
     $clientId = $AppId
@@ -130,11 +131,12 @@ Import-Module C:\CloudDeployment\Setup\Common\AzureADConfiguration.psm1 -ErrorAc
 $AzureDirectoryTenantId = Get-TenantIdFromName -azureEnvironment $azureEnvironment -tenantName $azureDirectoryTenantName
 
 if(-not $UsingServicePrincipal){
-
+    
+    Write-Verbose "Using refresh token created from credentials to register with Azure"
     if(-not $azureCredential)
     {
         Write-Verbose "Prompt user to enter Azure Credentials to get refresh token"
-        $tenantDetails = Get-AzureADTenantDetails -AzureEnvironment $azureEnvironment -AADDirectoryTenantName $azureDirectoryTenantName
+        $tenantDetails = Get-AzureADTenantDetails -AzureEnvironment $azureEnvironment -AADDirectoryTenantName $azureDirectoryTenantName        
     }
     else
     {
@@ -143,21 +145,34 @@ if(-not $UsingServicePrincipal){
     }
 
     $refreshToken = (ConvertTo-SecureString -string $tenantDetails["RefreshToken"] -AsPlainText -Force)
+    if ($refreshToken -eq $null){
+        $message = "Refresh token not generated correctly. Current value: $refreshToken"
+        throw $message        
+    }
 }
 
 #
 # Step 1: Configure Bridge identity
 #
 
-if ($UsingServicePrincipal)
-{
-    .\Configure-BridgeIdentity.ps1 -ClientId $clientId -ClientCertThumbprint $cert.Thumbprint -AzureDirectoryTenantName $AzureDirectoryTenantName -AzureEnvironment $AzureEnvironment -ServicePrincipal -Verbose
-    Write-Verbose "Configure Bridge identity completed with service principal"
+Write-Verbose "Calling Configure-BridgeIdentity.ps1"
+try {
+
+    if ($UsingServicePrincipal)
+    {
+        .\Configure-BridgeIdentity.ps1 -ClientId $clientId -ClientCertThumbprint $cert.Thumbprint -AzureDirectoryTenantName $AzureDirectoryTenantName -AzureEnvironment $AzureEnvironment -ServicePrincipal -Verbose
+        Write-Verbose "Configure Bridge identity completed with service principal"
+    }
+    else
+    {
+        .\Configure-BridgeIdentity.ps1 -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureDirectoryTenantName $azureDirectoryTenantName -AzureEnvironment $azureEnvironment -Verbose
+        Write-Verbose "Configure Bridge identity completed with refresh token"
+    }
 }
-else
-{
-    .\Configure-BridgeIdentity.ps1 -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureDirectoryTenantName $azureDirectoryTenantName -AzureEnvironment $azureEnvironment -Verbose
-    Write-Verbose "Configure Bridge identity completed with refresh token"
+catch{
+    $exceptionMessage = $_.Exception.Message
+    Write-Warning "Registration failed during Configure-BridgeIdentity.ps1. Logs can be found at $env:SystemDrive\CloudDeployment\Logs\"
+    throw $exceptionMessage
 }
 
 #
@@ -167,15 +182,21 @@ else
 $bridgeAppConfigFile = "\\SU1FileServer\SU1_Infrastructure_1\ASResourceProvider\Config\AzureBridge.IdentityApplication.Configuration.json"
 $registrationOutputFile = "c:\temp\registration.json"
 
-Write-Verbose "Calling New-RegistrationRequest.ps1"
-.\New-RegistrationRequest.ps1 -BridgeAppConfigFile $bridgeAppConfigFile -RegistrationRequestOutputFile $registrationOutputFile -Verbose
-Write-Verbose "New registration request completed"
+try{
+    Write-Verbose "Calling New-RegistrationRequest.ps1"
+    .\New-RegistrationRequest.ps1 -BridgeAppConfigFile $bridgeAppConfigFile -RegistrationRequestOutputFile $registrationOutputFile -Verbose
+    Write-Verbose "New registration request completed"
+}
+catch{
+    $exceptionMessage = $_.Exception.Message
+    Write-Warning "Registration failed during New-RegistrationRequest.ps1. Logs can be found at $env:SystemDrive\CloudDeployment\Logs\"
+    throw $exceptionMessage
+}
 
 #
 # Step 3: Register Azure Stack with Azure
 #
 
-Disable-AzureRmDataCollection
 New-Item -ItemType Directory -Force -Path "C:\temp"
 $registrationRequestFile = "c:\temp\registration.json"
 $registrationOutputFile = "c:\temp\registrationOutput.json"
@@ -185,21 +206,28 @@ $logPath = (New-Item -Path "$env:SystemDrive\CloudDeployment\Logs\" -ItemType Di
 $logFile = Join-Path -Path $logPath -ChildPath "Register-AzureStack.${timestamp}.txt"
 try { Start-Transcript -Path $logFile -Force | Out-String | Write-Verbose -Verbose } catch { Write-Warning -Message $_.Exception.Message }
 
-if ($UsingServicePrincipal)
-{
-    Login-AzureRmAccount -EnvironmentName $AzureEnvironment -ServicePrincipal -CertificateThumbprint $cert.Thumbprint -ApplicationId $appId  -TenantId $AzureDirectoryTenantId -Verbose
+try{
+    if ($UsingServicePrincipal)
+    {
+        Login-AzureRmAccount -EnvironmentName $AzureEnvironment -ServicePrincipal -CertificateThumbprint $cert.Thumbprint -ApplicationId $appId  -TenantId $AzureDirectoryTenantId -Verbose
 
-    .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $AzureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
-        -ClientCert $cert -ClientId $appId  -AzureEnvironmentName $AzureEnvironment -RegistrationRequestFile $registrationRequestFile -RegistrationOutputFile $registrationOutputFile `
-        -Location "westcentralus" -ServicePrincipal -Verbose
-    Write-Verbose "Register Azure Stack with Azure completed with service principal"
+        .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $AzureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
+            -ClientCert $cert -ClientId $appId  -AzureEnvironmentName $AzureEnvironment -RegistrationRequestFile $registrationRequestFile -RegistrationOutputFile $registrationOutputFile `
+            -Location "westcentralus" -ServicePrincipal -Verbose
+        Write-Verbose "Register Azure Stack with Azure completed with service principal"
+    }
+    else
+    {
+        .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
+                                    -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
+                                    -RegistrationOutputFile $registrationOutputFile -Location "westcentralus" -Verbose
+        Write-Verbose "Register Azure Stack with Azure completed with refresh token"
+    }
 }
-else
-{
-    .\Register-AzureStack.ps1 -BillingModel PayAsYouUse -EnableSyndication -ReportUsage -SubscriptionId $azureSubscriptionId -AzureAdTenantId $AzureDirectoryTenantId `
-                                -RefreshToken $refreshToken -AzureAccountId $tenantDetails["UserName"] -AzureEnvironmentName $azureEnvironment -RegistrationRequestFile $registrationRequestFile `
-                                -RegistrationOutputFile $registrationOutputFile -Location "westcentralus" -Verbose
-    Write-Verbose "Register Azure Stack with Azure completed with refresh token"
+Catch{
+    $exceptionMessage = $_.Exception.Message
+    Write-Warning "Registration failed during Register-AzureStack.ps1. Logs can be found at $env:SystemDrive\CloudDeployment\Logs\"
+    throw $exceptionMessage
 }
 try { Stop-Transcript -Verbose } catch { Write-Warning "$_" }    
 
@@ -245,6 +273,7 @@ catch
     else
     {
         Write-Error -Message "Activate-Bridge: Error : $($_.Exception)"
+        throw $exceptionMessage
     }
 }
 
