@@ -4,6 +4,13 @@ $Global:TxtLogFile              = "AzureStackCanaryLog.Log"
 $Global:wttLogFileName          = ""
 $Global:listAvailableUsecases   = $false
 $Global:exclusionList           = @()
+
+# Parallelization
+$Global:mutex                   = New-Object System.Threading.Mutex
+$Global:counts                  = New-Object System.Collections.Generic.Dictionary[string,int]
+$Global:deps                    = New-Object System.Collections.Generic.Dictionary[string,string[]]
+$Global:jobs                    = New-Object System.Collections.Generic.Dictionary[string,PSCustomObject]
+
 if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1")
 {
     Import-Module -Name "$PSScriptRoot\..\WTTLog.ps1" -Force
@@ -271,20 +278,64 @@ function End-Scenario
     }
 }
 
-function Invoke-Usecase
+function Enter-Lock {
+    $Global:mutex.WaitOne()
+}
+
+function Exit-lock {
+    $Global:mutex.ReleaseMutex()
+}
+
+# This needs to be done, but is not a test
+function Invoke-Prereq {
+
+}
+
+function Add-Usecase
 {
     [CmdletBinding()]
     param (
         [parameter(Mandatory=$true, Position = 0)]
         [ValidateNotNullOrEmpty()]
         [string]$Name,
+        
         [parameter(Mandatory=$false, Position = 1)]
         [ValidateNotNullOrEmpty()]
         [string]$Description, 
+
         [parameter(Mandatory=$true, Position = 2)]
         [ValidateNotNullOrEmpty()]
-        [ScriptBlock]$UsecaseBlock    
+        [ScriptBlock]$UsecaseBlock,
+        
+        [parameter(Mandatory=$true, Position = 3)]
+        [string[]]$Prereqs = @()
     )
+    
+    ForEach-Object -InputObject $Prereqs {
+        Enter-Lock
+        $count = $Global:counts[$Name] += 1
+        Exit-lock
+    }
+
+    [PSCustomObject]$obj = @{
+        Name            = $Name
+        Description     = $Description
+        UsecaseBlock    = $UsecaseBlock
+    }
+    $Global:jobs.Add($Name, $obj)
+}
+
+function Invoke-UseCase {
+    param(
+        [parameter(Mandatory=$true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        $Object
+    )
+
+    [string]$Name               = $Object.Name
+    [string]$Description        = $Object.Description
+    [ScriptBlock]$UsecaseBlock  = $Object.UsecaseBlock
+        
 
     if ($Global:listAvailableUsecases)
     {
