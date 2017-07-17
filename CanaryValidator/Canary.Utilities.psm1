@@ -5,6 +5,24 @@ $Global:wttLogFileName = ""
 $Global:listAvailableUsecases = $false
 $Global:exclusionList = @()
 
+
+# Locks
+$Global:mutex = New-Object System.Threading.Mutex
+$Global:countMutex = New-Object System.Threading.Mutex
+
+# "Name" -> { "DependsOnMe" , }
+$Global:Dependendents = @{}
+
+# "Name" -> { "I depend on" , }
+$Global:Prereqs = @{}
+
+# list of jobs to run when dependencies met
+$Global:Jobs = @{}
+
+# current list of jobs running
+$Global:RunningJobsCount = 0
+
+
 if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1") {
     Import-Module -Name "$PSScriptRoot\..\WTTLog.ps1" -Force
     $Global:wttLogFileName = (Join-Path $PSScriptRoot "AzureStack_CanaryValidation_Test.wtl")    
@@ -14,6 +32,15 @@ $CurrentUseCase = @{}
 [System.Collections.Stack] $UseCaseStack = New-Object System.Collections.Stack
 filter timestamp {"$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.ffff") $_"}
 
+function Out-Log {
+    param(
+        [parameter(Mandatory = $true, Position = 0)]
+        [string]$Message,
+
+        [string]$Filename = "C:\Users\AzureStackAdmin\Desktop\MyCanary\debug.txt"
+    )
+    $Message | Out-File -Append -FilePath $Filename
+}
 
 function Log-Info {
     Param ($Message)
@@ -140,7 +167,9 @@ function Get-CanaryResult {
             $results += $ucObj
         }
     }   
-    Log-Info($results | Format-Table -AutoSize)                                               
+    if ($results) {
+        Log-Info($results | Format-Table -AutoSize)                                               
+    }
 }
 
 function Get-CanaryLonghaulResult {
@@ -225,37 +254,6 @@ function Start-Scenario {
     }
 
     $Global:ContinueOnFailure = $ContinueOnFailure
-}
-
-function Start-ParallelJobs {
-    
-    # Run any parallel work
-
-    # find jobs with no dependencies and schedule them
-    $jobsToSchedule = $()
-    Enter-Lock
-    ForEach-Object -InputObject $Global:numDependencies {
-        if ($_.value -eq 0) {
-            $jobsToSchedule = $jobsToSchedule + $_.key
-        }
-    }
-    Exit-Lock
-
-    $jobsRunning = ($Global:runningJobCount -gt 0)
-
-    # start parallel jobs
-    ForEach-Object -InputObject $jobsToSchedule {
-        Start-ParallelJob $_
-    }
-    
-    # Wait for jobs to finish
-    
-    while ($jobRunning) {
-        Start-Sleep -m 100
-        Enter-Lock -Mutex $Global:countMutex
-        $jobsRunning = ($Global:runningJobCount -gt 0)
-        Exit-Lock -Mutex $Global:countMutex
-    }
 }
 
 function End-Scenario {
@@ -879,8 +877,9 @@ function Get-RemoteSession {
         [System.Management.Automation.PSCredential]$SecureCredential,
 
         [parameter(Mandatory = $false, Position = 2)]
-        [string]$ErrorMessage = "Unable to establish a remote session: $ComputerName",
+        [string]$ErrorMessage = "Unable to establish a remote session: $ComputerName"
     )
+
     $sw = [system.diagnostics.stopwatch]::startNew(); 
     while (-not($session = New-PSSession -ComputerName $ComputerName -Credential $SecureCredential -ErrorAction SilentlyContinue)) {
         if (($sw.ElapsedMilliseconds -gt 240000) -and (-not($session))) {
@@ -953,22 +952,6 @@ function Invoke-RemoteScript {
 
 
 
-# Locks
-$Global:mutex = New-Object System.Threading.Mutex
-$Global:countMutex = New-Object System.Threading.Mutex
-
-# "TestName" -> How many actions it depends on
-$Global:numDependencies = @{}
-
-# "UsecaseName" -> { "UseCaseDependent" , }
-$Global:UsecaseDependencies = @{}
-
-# list of jobs to run when dependencies met
-$Global:jobs = @{}
-
-# current list of jobs running
-$Global:runningJobCount = 0
-
 function Enter-Lock {
     param(
         [ValidateNotNullOrEmpty()]
@@ -992,15 +975,62 @@ function Start-ParallelJob {
         [string]$Name
     )
 
+    Out-Log "Starting job... $Name"
     
     # signal we are running
     Enter-Lock -Mutex $Global:countMutex
-    $Global:runningJobCount += 1
+    $val = $Global:RunningJobsCount
+    $Global:RunningJobsCount = $val + 1
     Exit-Lock  -Mutex $Global:countMutex
 
-    $job = $Global:jobs[$Name]
-    Start-Job $job
+    [ScriptBlock]$job = $Global:jobs[$Name]
+    Out-Log $job
+    if ($job) {
+        Invoke-Command -ScriptBlock $job
+    }
+    else {
+        throw "job is null!"
+    }
+    
 
+}
+
+# Run any parallel work
+function Start-ParallelJobs {
+    $ErrorActionPreference = 'Stop'
+    
+    Out-Log "Start-ParallelJobs"
+
+    # find jobs with no dependencies and schedule them
+    $jobsToSchedule = $()
+    
+    Enter-Lock
+
+    foreach ($key in $Global:Prereqs.Keys) {
+        $count = $Global:Prereqs[$key].Count
+        if ($count -eq 0) {
+            $jobsToSchedule += $key
+        }
+    }
+    Exit-Lock
+    
+    # start parallel jobs
+    foreach ($job in $jobsToSchedule) {
+        Start-ParallelJob $job
+    }
+    
+    # Wait for jobs to finish
+    [bool]$jobsRunning = ($Global:RunningJobsCount -gt 0)
+    while ($jobsRunning) {
+        Start-Sleep -m 100
+        Enter-Lock -Mutex $Global:countMutex
+        $jobsRunning = ($Global:RunningJobsCount -gt 0)
+        Exit-Lock -Mutex $Global:countMutex
+    }
+
+    # Goes over each job that I scheduled, print out errors
+
+    Out-Log "all parallel jobs completed.."
 }
 
 function Add-Job {
@@ -1013,46 +1043,52 @@ function Add-Job {
         [ValidateNotNullOrEmpty()]
         [ScriptBlock]$Script,
         
-        [parameter(Mandatory = $true, Position = 3)]
-        [string[]]$Prereqs = @()
+        [parameter(Mandatory = $false, Position = 3)]
+        [string[]]$Prereqs = $null
     )
 
     # Make sure shared data-structures cannot be trashed
     Enter-Lock
 
+    Out-Log "Add-Job: $Name"
     try {
 
-        # Intialize how many remaining need to finish before I can start
-        $Global:numDependencies[$Name] = $Prereqs.Length
-        
-        # Add me to dependencies so that when all are finished 
-        # we can start me
-        ForEach-Object -InputObject $Prereqs {
-            $Global:UsecaseDependencies.Get($_) += $Name
+        # Save prereqs
+        $Global:Prereqs.Add($Name, $Prereqs)
+
+        # Add me as dependents of jobs I am required to wait on
+        foreach ($i in $Prereqs) {
+            $arr = $Global:Dependendents[$i]
+            $Global:Dependendents[$i] = $arr + $Name
         }
     
         $job = {
+            Out-Log "beginning job... $Name"
 
             # run  it
-            Invoke-Command $Block
+            Invoke-Command $Script
     
             # decrement dependency counts for each dependent, if we reach 0
             # then we can start the next job.
             Enter-Lock
-            ForEach-Object -InputObject $Global:UsecaseDependencies {
-                $Global:numDependencies[$_] -= 1
-                if ($Global:numDependencies[$_] -eq 0) {
-                    Start-ParallelJob $_
+            foreach ( $dep in $Global:Dependendents) {
+                $preqs = $Global:Prereqs[$dep].Remove($Name)
+                $Global:Prereqs[$dep] = $preqs
+                if ($preqs.Count -eq 0) {
+                    Start-ParallelJob $dep
                 }
             }
             Exit-lock
 
             # Signal that this job has completed
             Enter-Lock -Mutex $Global:countMutex
-            $Global:runningJobCount -= 1
+            $Global:RunningJobsCount -= 1
             Exit-Lock  -Mutex $Global:countMutex
+
+            Out-Log "job finished... $Name"
         }
         $Global:jobs.Add($Name, $job)
+
     }
     catch {
         throw
@@ -1107,7 +1143,7 @@ function Add-Usecase {
         [parameter(Mandatory = $false, Position = 3)]
         [string[]]$Prereqs = @()
     )
-    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-UseCase -Name $Name -Description $Description -UsecaseBlock $UsecaseBlock }
+    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-UseCase -Name $Name -Description $Description -UsecaseBlock $UsecaseBlock } | Out-Null
 }
 
 <#
@@ -1157,9 +1193,9 @@ function Add-Action {
         [ValidateNotNullOrEmpty()]
         [ScriptBlock]$ActionBlock,
         
-        [parameter(Mandatory = $true, Position = 3)]
+        [parameter(Mandatory = $false, Position = 3)]
         [string[]]$Prereqs = @()
     )
-    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-Action -Name $Name -ActionBlock $ActionBlock }
+    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-Action -Name $Name -ActionBlock $ActionBlock } | Out-Null
 }
 

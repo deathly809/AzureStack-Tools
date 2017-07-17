@@ -331,7 +331,8 @@ while ($runCount -le $NumberOfIterations) {
     }
 
     if (($TenantAdminCredentials) -or ($ListAvailable)) {
-        Add-Usecase -Name "ValidateAdminOperationsThroughTenant" -Description "Test that Admin operations are visible from Tenant" -Prereqs "InitializeAdminSession" -ActionBlock {
+        Add-Usecase -Name "ValidateAdminOperationsThroughTenant" -Description "Test that Admin operations are visible from Tenant" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+        {
             $subscriptionRGName = $CanaryUtilitiesRG + "subscrrg" + [Random]::new().Next(1, 999)
             $tenantPlanName = $CanaryUtilitiesRG + "tenantplan" + [Random]::new().Next(1, 999)        
             $tenantOfferName = $CanaryUtilitiesRG + "tenantoffer" + [Random]::new().Next(1, 999)
@@ -1082,7 +1083,7 @@ while ($runCount -le $NumberOfIterations) {
 
     if (-not $NoCleanup) {
 
-        Invoke-Action -Name "IfNoCleanup" -Prereqs "CreateTenantAzureStackEnv" -ActionBlock {
+        Add-Action -Name "IfNoCleanup" -Prereqs "CreateTenantAzureStackEnv" -ActionBlock {
         
             if (-not ($NoCleanupOnFailure -and (Get-CanaryFailureStatus))) {
                 Invoke-Usecase -Name 'DeleteVMWithPrivateIP' -Description "Delete the VM with private IP" -UsecaseBlock `
@@ -1145,11 +1146,16 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    End-Scenario
-    $runCount += 1
-    if (-not $ListAvailable) {
-        Get-CanaryResult
-    }    
+
+    Add-Usecase -Name "Hi" -Description "I say hi" -Prereqs "", "", "" -UsecaseBlock `{
+
+}
+
+End-Scenario
+$runCount += 1
+if (-not $ListAvailable) {
+    Get-CanaryResult
+}    
 }
 
 if ($NumberOfIterations -gt 1) {
