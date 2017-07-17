@@ -876,13 +876,13 @@ function Get-RemoteSession {
 
         [parameter(Mandatory = $true, Position = 1)]
         [ValidateNotNullOrEmpty()]
-        [System.Management.Automation.PSCredential]$Credential,
+        [System.Management.Automation.PSCredential]$SecureCredential,
 
         [parameter(Mandatory = $false, Position = 2)]
-        [string]$ErrorMessage = "Unable to establish a remote session to the VM using the IP"
+        [string]$ErrorMessage = "Unable to establish a remote session: $ComputerName",
     )
     $sw = [system.diagnostics.stopwatch]::startNew(); 
-    while (-not($session = New-PSSession -ComputerName $ComputerName -Credential $Credential -ErrorAction SilentlyContinue)) {
+    while (-not($session = New-PSSession -ComputerName $ComputerName -Credential $SecureCredential -ErrorAction SilentlyContinue)) {
         if (($sw.ElapsedMilliseconds -gt 240000) -and (-not($session))) {
             $sw.Stop(); 
             throw [System.Exception]$ErrorMessage
@@ -890,6 +890,51 @@ function Get-RemoteSession {
         Start-Sleep -Seconds 15
     };
     $session
+}
+
+function Invoke-RemoteScript {
+    param(
+        [parameter(Mandatory = $true, ParameterSetName = "NameCred")]
+        [ValidateNotNullOrEmpty()]
+        $ComputerName,
+
+        [parameter(Mandatory = $true, ParameterSetName = "NameCred")]
+        [ValidateNotNullOrEmpty()]
+        [System.Management.Automation.PSCredential]$SecureCredential,
+
+        [parameter(Mandatory = $true, ParameterSetName = "Session")]
+        [ValidateNotNullOrEmpty()]
+        [PSSession]$Session,
+
+        [parameter(Mandatory = $false, ParameterSetName = "NameCred")]
+        [parameter(ParameterSetName = "Session")]
+        [string]$ErrorMessage = "Unable to establish a remote session: $ComputerName",
+
+        [parameter(Mandatory = $true, ParameterSetName = "NameCred")]
+        [ValidateNotNullOrEmpty()]
+        [parameter(ParameterSetName = "Session")]
+        [ScriptBlock]$Script,
+
+        [parameter(Mandatory = $false, ParameterSetName = "NameCred")]
+        [parameter(ParameterSetName = "Session")]
+        [object[]]$ArgumentList,
+
+        [parameter(Mandatory = $false, ParameterSetName = "NameCred")]
+        [parameter(ParameterSetName = "Session")]
+        $ErrorVariable = $null
+    )
+
+    if ($PSCmdlet.NameCred) {
+        $Session = Get-RemoteSession -ComputerName $ComputerName -SecureCredential $SecureCredential -ErrorMessage $ErrorMessage
+    }
+    $Result = Invoke-Command -Session $session -Script $Script -ArgumentList $ArgumentList -ErrorVariable $ErrorVariable
+    
+    if ($PSCmdlet.Session) {
+        return $Result
+    }
+    else {
+        return $Session, $Result
+    }
 }
 
 #########################################

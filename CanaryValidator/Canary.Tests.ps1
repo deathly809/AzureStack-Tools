@@ -673,9 +673,9 @@ while ($runCount -le $NumberOfIterations) {
         $fileContentBytes = get-content $kvCertificatePath -Encoding Byte
         $fileContentEncoded = [System.Convert]::ToBase64String($fileContentBytes)
         $jsonObject = '{
-            "data": "$filecontentencoded",
+            "data": "' + $filecontentencoded + '",
             "dataType" :"pfx",
-            "password": "$certPasswordString"
+            "password": "' + $certPasswordString + '"
         }'
 
         $jsonObjectBytes = [System.Text.Encoding]::UTF8.GetBytes($jsonObject)
@@ -812,7 +812,8 @@ while ($runCount -le $NumberOfIterations) {
     [string]$privateVMName = ""
     [string]$privateVMIP = ""
 
-    Add-Action -Name "SelectVMInformation" -Prereqs "QueryTheVMsDeployed" -ActionBlock {
+    Add-Action -Name "SelectVMInformation" -Prereqs "QueryTheVMsDeployed" -ActionBlock `
+    {
         if ($canaryWindowsVMList) {   
             $canaryWindowsVMList | Format-Table -AutoSize    
             foreach ($vm in $canaryWindowsVMList) {
@@ -831,37 +832,72 @@ while ($runCount -le $NumberOfIterations) {
     Add-Usecase -Name 'CheckVMCommunicationPreVMReboot' -Description "Check if the VMs deployed can talk to each other before they are rebooted" -Prereqs "SelectVMInformation" -UsecaseBlock `
     {
         $vmUser = ".\$VMAdminUserName"
-        $secureCredentials = New-Object System.Management.Automation.PSCredential $vmUser, (ConvertTo-SecureString $VMAdminUserPass -AsPlainText -Force)
-        $vmCommsScriptBlock = "Get-Childitem -Path `"cert:\LocalMachine\My`" | Where-Object Subject -Match $keyvaultCertName"
-        if (($pubVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $publicVMName -ErrorAction Stop) -and ($pvtVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $privateVMName -ErrorAction Stop)) {
-            
+        $secureCreds = New-Object System.Management.Automation.PSCredential $vmUser, (ConvertTo-SecureString $VMAdminUserPass -AsPlainText -Force)
+        $vmCommsExpression = "Get-Childitem -Path `"cert:\LocalMachine\My`" | Where-Object Subject -Match $keyvaultCertName"
+
+        $pubVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $publicVMName -ErrorAction Stop
+        $pvtVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $privateVMName -ErrorAction Stop
+
+        if ($pubVMObject -and $pvtVMObject) {
             Set-item wsman:\localhost\Client\TrustedHosts -Value $publicVMIP -Force -Confirm:$false
-            $publicVMSession = Get-RemoteSession -ComputerName $publicVMIP -Credential $secureCredentials -ErrorMessage "Unable to establish a remote session to the tenant VM using public IP: $publicVMIP"
 
-            if ($publicVMSession) {
-                Set-item wsman:\localhost\Client\TrustedHosts -Value $privateVMIP -Force -Confirm:$false | Out-Null
+            $AddToTrustedHostScript = {
+                param (
+                    [string]$privateIP
+                ) 
+                Set-item wsman:\localhost\Client\TrustedHosts -Value $privateIP -Force -Confirm:$false
+            }
+
+            $publicVMSession, $_ = Invoke-RemoteScript `
+                -ComputerName $publicVMIP `
+                -SecureCredential $secureCreds `
+                -ErrorMessage "Unable to establish a remote session to the tenant VM using public IP: $publicVMIP" `
+                -Script $AddToTrustedHostScript `
+                -ArgumentList $privateVMIP | Out-Null
+
+            $fromPublicIPConnectToPrivateIPToGetValue = {
+                param (
+                    [string]$privateIP, 
+                    [System.Management.Automation.PSCredential]$secureCreds, 
+                    [ScriptBlock]$expressionToRun
+                ) 
+
+                $scriptBlock = {
+                    param(
+                        [string]$expression
+                    )
+                    Invoke-Expression $expression
+                }
+
+                $session, $result = Invoke-RemoteScript -ComputerName $privateIP -SecureCredential $secureCreds -Script $scriptBlock -ArgumentList $expressionToRun
+
+                Remove-PSSession $session
+                return $result
+            }
+
+            $privateVMResponseFromRemoteSession = Invoke-RemoteScript `
+                -Session $publicVMSession `
+                -ErrorMessage "Unable to establish a remote session to the tenant VM using public IP: $publicVMIP" `
+                -Script $fromPublicIPConnectToPrivateIPToGetValue `
+                -ArgumentList $privateVMIP, $secureCreds, $vmCommsExpression `
+                -ErrorVariable remoteExecError | Out-Null
                 
-                $privateVMResponseFromRemoteSession = Invoke-Command -Session $publicVMSession -Script {
-                    param ($privateIP, $secureCredentials, $scriptToRun) 
-                    $privateSession = Get-RemoteSession -ComputerName $privateIP -Credential $secureCredentials -ErrorMessage "Unable to establish a remote session to the tenant VM using private IP: $privateIP"
-                    Invoke-Command -Session $privateSession -ScriptBlock $scriptToRun
-                } -ArgumentList $privateVMIP, $secureCredentials, $vmCommsScriptBlock -ErrorVariable remoteExecError 2>$null
 
-                $publicVMSession | Remove-PSSession -Confirm:$false
-                if ($remoteExecError) {
-                    throw [System.Exception]"$remoteExecError"
-                }
-                if ($privateVMResponseFromRemoteSession) {
-                    $privateVMResponseFromRemoteSession
-                }
-                else {
-                    throw [System.Exception]"The expected certificate from KV was not found on the tenant VM with private IP: $privateVMIP"
-                }
-            }    
+            $publicVMSession | Remove-PSSession -Confirm:$false
+
+            if ($remoteExecError) {
+                throw [System.Exception]"$remoteExecError"
+            }
+            if ($privateVMResponseFromRemoteSession) {
+                $privateVMResponseFromRemoteSession
+            }
+            else {
+                throw [System.Exception]"The expected certificate from KV was not found on the tenant VM with private IP: $privateVMIP"
+            }
         }
     }
 
-    Add-Usecase -Name 'AddDatadiskToVMWithPrivateIP' -Description "Add a data disk from utilities resource group to the VM with private IP" -Prereqs "SelectVMInformation" -UsecaseBlock `
+    Add-Usecase -Name 'AddDatadiskToVMWithPrivateIP' -Description "Add a data disk from utilities resource group to the VM with private IP" -Prereqs "CheckVMCommunicationPreVMReboot" -UsecaseBlock `
     {
         Invoke-Usecase -Name 'StopDeallocateVMWithPrivateIPBeforeAddingDatadisk' -Description "Stop/Deallocate the VM with private IP before adding the data disk" -UsecaseBlock `
         {
@@ -927,7 +963,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'RestartVMWithPublicIP' -Description "Restart the VM which has a public IP address" -Prereqs "CreateAdminAzureStackEnv" -UsecaseBlock `
+    Add-Usecase -Name 'RestartVMWithPublicIP' -Description "Restart the VM which has a public IP address" -Prereqs "ApplyDataDiskCheckCustomScriptExtensionToVMWithPrivateIP" -UsecaseBlock `
     {
         if ($vmObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $publicVMName -ErrorAction Stop) {
             $restartVM = $vmObject | Restart-AzureRmVM -ErrorAction Stop
@@ -937,7 +973,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'StopDeallocateVMWithPrivateIP' -Description "Stop/Dellocate the VM with private IP" -Prereqs "CreateAdminAzureStackEnv" -UsecaseBlock `
+    Add-Usecase -Name 'StopDeallocateVMWithPrivateIP' -Description "Stop/Dellocate the VM with private IP" -Prereqs "ApplyCustomScriptExtensionToVMWithPrivateIP" -UsecaseBlock `
     {
         if ($vmObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $privateVMName -ErrorAction Stop) {
             $stopVM = $vmObject | Stop-AzureRmVM -Force -ErrorAction Stop
@@ -964,33 +1000,71 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'CheckVMCommunicationPostVMReboot' -Description "Check if the VMs deployed can talk to each other after they are rebooted" -Prereqs "CreateAdminAzureStackEnv" -UsecaseBlock `
+    Add-Usecase -Name 'CheckVMCommunicationPostVMReboot' -Description "Check if the VMs deployed can talk to each other after they are rebooted" -Prereqs "StartVMWithPrivateIP", "RestartVMWithPublicIP" -UsecaseBlock `
     {
         $vmUser = ".\$VMAdminUserName"
-        $secureCredentials = New-Object System.Management.Automation.PSCredential $vmUser, (ConvertTo-SecureString $VMAdminUserPass -AsPlainText -Force)
+        $secureCreds = New-Object System.Management.Automation.PSCredential $vmUser, (ConvertTo-SecureString $VMAdminUserPass -AsPlainText -Force)
         $vmCommsScriptBlock = "hostname"
-        if (($pubVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $publicVMName -ErrorAction Stop) -and ($pvtVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $privateVMName -ErrorAction Stop)) {
+        
+        $pubVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $publicVMName -ErrorAction Stop
+        $pvtVMObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $privateVMName -ErrorAction Stop
+
+        if ($pubVMObject -and $pvtVMObject) {
+
             Set-item wsman:\localhost\Client\TrustedHosts -Value $publicVMIP -Force -Confirm:$false
-            $sw = [system.diagnostics.stopwatch]::startNew()
-            while (-not($publicVMSession = New-PSSession -ComputerName $publicVMIP -Credential secureCredentials -ErrorAction SilentlyContinue)) {if (($sw.ElapsedMilliseconds -gt 240000) -and (-not($publicVMSession))) {$sw.Stop(); throw [System.Exception]"Unable to establish a remote session to the tenant VM using public IP: $publicVMIP"}; Start-Sleep -Seconds 15}
-            if ($publicVMSession) {
-                Invoke-Command -Session $publicVMSession -Script {param ($privateIP) Set-item wsman:\localhost\Client\TrustedHosts -Value $privateIP -Force -Confirm:$false} -ArgumentList $privateVMIP | Out-Null
-                $privateVMResponseFromRemoteSession = Invoke-Command -Session $publicVMSession -Script {param ($privateIP, $secureCredentials, $scriptToRun) $sw = [system.diagnostics.stopwatch]::startNew(); while (-not($privateSess = New-PSSession -ComputerName $privateIP -Credential $secureCredentials -ErrorAction SilentlyContinue)) {if (($sw.ElapsedMilliseconds -gt 240000) -and (-not($privateSess))) {$sw.Stop(); throw [System.Exception]"Unable to establish a remote session to the tenant VM using private IP: $privateIP"}; Start-Sleep -Seconds 15}; Invoke-Command -Session $privateSess -Script {param($script) Invoke-Expression $script} -ArgumentList $scriptToRun} -ArgumentList $privateVMIP, $secureCredentials, $vmCommsScriptBlock -ErrorVariable remoteExecError 2>$null
-                $publicVMSession | Remove-PSSession -Confirm:$false
-                if ($remoteExecError) {
-                    throw [System.Exception]"$remoteExecError"
+
+            $script1 = {
+                param (
+                    [string]$privateIP
+                )
+                Set-item wsman:\localhost\Client\TrustedHosts -Value $privateIP -Force -Confirm:$false
+            }
+            $publicVMSession, $result = Invoke-RemoteScript `
+                -ComputerName $publicVMIP `
+                -SecureCredential $secureCreds `
+                -ErrorMessage "Unable to establish a remote session to the tenant VM using public IP: $publicVMIP" `
+                -Script $script1 `
+                -ArgumentList $privateVMIP
+
+            $script2 = {
+                param (
+                    [string]$privateIP,
+                    [System.Management.Automation.PSCredential]$secureCreds,
+                    [ScriptBlock]$expressionToRun
+                )
+                
+                $wrapper = {
+                    param(
+                        [string]$expression
+                    )
+                    Invoke-Expression $expression
                 }
-                if ($privateVMResponseFromRemoteSession) {
-                    $privateVMResponseFromRemoteSession
-                }
-                else {
-                    throw [System.Exception]"Host name could not be retrieved from the tenant VM with private IP: $privateVMIP"
-                }
-            }    
+                $session, $result = Invoke-RemoteScript -ComputerName $privateIP -SecureCredential $secureCreds -Script $wrapper -ArgumentList $expressionToRun
+
+                $session | Remove-PSSession -Confirm:$false
+                return $result
+            }
+
+            $privateVMResponseFromRemoteSession = Invoke-RemoteScript `
+                -Session $publicVMSession `
+                -Script $script2 `
+                -ArgumentList $privateVMIP, $vmCreds, $vmCommsScriptBlock `
+                -ErrorVariable remoteExecError 
+
+            $publicVMSession | Remove-PSSession -Confirm:$false
+            if ($remoteExecError) {
+                throw [System.Exception]"$remoteExecError"
+            }
+            if ($privateVMResponseFromRemoteSession) {
+                $privateVMResponseFromRemoteSession
+            }
+            else {
+                throw [System.Exception]"Host name could not be retrieved from the tenant VM with private IP: $privateVMIP"
+            }
         }
     }
     
-    Add-Usecase -Name 'CheckExistenceOfScreenShotForVMWithPrivateIP' -Description "Check if screen shots are available for Windows VM with private IP and store the screen shot in log folder" -Prereqs "CreateAdminAzureStackEnv" -UsecaseBlock `
+    Add-Usecase -Name 'CheckExistenceOfScreenShotForVMWithPrivateIP' -Description "Check if screen shots are available for Windows VM with private IP and store the screen shot in log folder" -Prereqs "StartVMWithPrivateIP" -UsecaseBlock `
     {
         $sa = Get-AzureRmStorageAccount -ResourceGroupName $CanaryVMRG -Name "$($CanaryVMRG)2sa"
         $diagSC = $sa | Get-AzureStorageContainer | Where-Object {$_.Name -like "bootdiagnostics-$CanaryVMRG*"}
@@ -1001,7 +1075,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'EnumerateAllResources' -Description "List out all the resources that have been deployed" -Prereqs "CreateAdminAzureStackEnv" -UsecaseBlock `
+    Add-Usecase -Name 'EnumerateAllResources' -Description "List out all the resources that have been deployed" -Prereqs "StartVMWithPrivateIP" -UsecaseBlock `
     {
         Get-AzureRmResource
     }
@@ -1081,3 +1155,4 @@ while ($runCount -le $NumberOfIterations) {
 if ($NumberOfIterations -gt 1) {
     Get-CanaryLonghaulResult -LogPath $CanaryLogPath
 }
+
