@@ -1,18 +1,11 @@
-$Global:ContinueOnFailure       = $false
-$Global:JSONLogFile             = "Run-Canary.JSON"
-$Global:TxtLogFile              = "AzureStackCanaryLog.Log"
-$Global:wttLogFileName          = ""
-$Global:listAvailableUsecases   = $false
-$Global:exclusionList           = @()
+$Global:ContinueOnFailure = $false
+$Global:JSONLogFile = "Run-Canary.JSON"
+$Global:TxtLogFile = "AzureStackCanaryLog.Log"
+$Global:wttLogFileName = ""
+$Global:listAvailableUsecases = $false
+$Global:exclusionList = @()
 
-# Parallelization
-$Global:mutex                   = New-Object System.Threading.Mutex
-$Global:counts                  = New-Object System.Collections.Generic.Dictionary[string,int]
-$Global:deps                    = New-Object System.Collections.Generic.Dictionary[string,string[]]
-$Global:jobs                    = New-Object System.Collections.Generic.Dictionary[string,PSCustomObject]
-
-if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1")
-{
+if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1") {
     Import-Module -Name "$PSScriptRoot\..\WTTLog.ps1" -Force
     $Global:wttLogFileName = (Join-Path $PSScriptRoot "AzureStack_CanaryValidation_Test.wtl")    
 }
@@ -22,20 +15,17 @@ $CurrentUseCase = @{}
 filter timestamp {"$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.ffff") $_"}
 
 
-function Log-Info
-{
+function Log-Info {
     Param ($Message)
 
-    if ($Message.GetType().Name -eq "String")
-    {
+    if ($Message.GetType().Name -eq "String") {
         $Message = "[INFO] " + $Message | timestamp
     }
     $Message | Tee-Object -FilePath $Global:TxtLogFile -Append
     Log-JSONReport $Message
 } 
 
-function Log-Error
-{
+function Log-Error {
     Param ([string] $Message)
 
     $Message = "[ERR] " + $Message | timestamp
@@ -43,8 +33,7 @@ function Log-Error
     Log-JSONReport $Message
 }
 
-function Log-Exception
-{
+function Log-Exception {
     Param ([string] $Message)
 
     $Message = "[EXCEPTION] " + $Message | timestamp
@@ -52,108 +41,89 @@ function Log-Exception
     Log-JSONReport $Message
 }
 
-function Log-JSONReport
-{
+function Log-JSONReport {
     param (
         [string] $Message
     )
-    if ($Message)
-    {    
-        if ($Message.Contains("[START]"))
-        {
+    if ($Message) {    
+        if ($Message.Contains("[START]")) {
             $time = $Message.Substring(0, $Message.IndexOf("[")).Trim()
             $name = $Message.Substring($Message.LastIndexOf(":") + 1).Trim()
-            if ($UseCaseStack.Count)
-            {
+            if ($UseCaseStack.Count) {
                 $nestedUseCase = @{
-                "Name" = $name
-                "StartTime" = $time
+                    "Name"      = $name
+                    "StartTime" = $time
                 }
-                if (-not $UseCaseStack.Peek().UseCase)
-                {
+                if (-not $UseCaseStack.Peek().UseCase) {
                     $UseCaseStack.Peek().Add("UseCase", @())
                 }
                 $UseCaseStack.Peek().UseCase += , $nestedUseCase
                 $UseCaseStack.Push($nestedUseCase)
             }
-            else
-            {
+            else {
                 $CurrentUseCase.Add("Name", $name)
                 $CurrentUseCase.Add("StartTime", $time)
                 $UseCaseStack.Push($CurrentUseCase)
             }
         }
-        elseif ($Message.Contains("[END]"))
-        {
+        elseif ($Message.Contains("[END]")) {
             $time = $Message.Substring(0, $Message.IndexOf("[")).Trim()
             $result = ""            
-            if ($UseCaseStack.Peek().UseCase -and ($UseCaseStack.Peek().UseCase | Where-Object {$_.Result -eq "FAIL"}))
-            {
+            if ($UseCaseStack.Peek().UseCase -and ($UseCaseStack.Peek().UseCase | Where-Object {$_.Result -eq "FAIL"})) {
                 $result = "FAIL" 
             }
-            elseif ($Message.Contains("[RESULT = PASS]"))
-            {
+            elseif ($Message.Contains("[RESULT = PASS]")) {
                 $result = "PASS"
             }
-            elseif ($Message.Contains("[RESULT = FAIL]"))
-            {
+            elseif ($Message.Contains("[RESULT = FAIL]")) {
                 $result = "FAIL"
             }
             $UseCaseStack.Peek().Add("Result", $result)
             $UseCaseStack.Peek().Add("EndTime", $time)            
             $UseCaseStack.Pop() | Out-Null
-            if (-not $UseCaseStack.Count)
-            {
+            if (-not $UseCaseStack.Count) {
                 $jsonReport = ConvertFrom-Json (Get-Content -Path $Global:JSONLogFile -Raw)
                 $jsonReport.UseCases += , $CurrentUseCase
                 $jsonReport | ConvertTo-Json -Depth 10 | Out-File -FilePath $Global:JSONLogFile
                 $CurrentUseCase.Clear()
             }
         }
-        elseif ($Message.Contains("[DESCRIPTION]"))
-        {
+        elseif ($Message.Contains("[DESCRIPTION]")) {
             $description = $Message.Substring($Message.IndexOf("[DESCRIPTION]") + "[DESCRIPTION]".Length).Trim()
             $UseCaseStack.Peek().Add("Description", $description)
         }
-        elseif ($Message.Contains("[EXCEPTION]"))
-        {
+        elseif ($Message.Contains("[EXCEPTION]")) {
             $exception = $Message.Substring($Message.IndexOf("[EXCEPTION]") + "[EXCEPTION]".Length).Trim()
             $UseCaseStack.Peek().Add("Exception", $exception)
         }
     }
 }
 
-function Get-CanaryResult
-{    
+function Get-CanaryResult {    
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$false)]
+        [parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
         [string]$LogFilename
     )
 
-    if ($LogFilename)
-    {
+    if ($LogFilename) {
         $logContent = Get-Content -Raw -Path $LogFilename | ConvertFrom-Json
     }
-    else 
-    {
+    else {
         $logContent = Get-Content -Raw -Path $Global:JSONLogFile | ConvertFrom-Json    
     }
     $results = @()   
-    foreach ($usecase in $logContent.UseCases)
-    {
+    foreach ($usecase in $logContent.UseCases) {
         $ucObj = New-Object -TypeName PSObject
-        if ([bool]($usecase.PSobject.Properties.name -match "UseCase"))
-        {
+        if ([bool]($usecase.PSobject.Properties.name -match "UseCase")) {
             $ucObj | Add-Member -Type NoteProperty -Name Name -Value $usecase.Name
             $ucObj | Add-Member -Type NoteProperty -Name Result -Value $usecase.Result
             $ucObj | Add-Member -Type NoteProperty -Name "Duration`n[Seconds]" -Value ((Get-Date $usecase.EndTime) - (Get-Date $usecase.StartTime)).TotalSeconds     
             $ucObj | Add-Member -Type NoteProperty -Name Description -Value $usecase.Description
             $results += $ucObj               
             
-            foreach ($subusecase in $usecase.UseCase)
-            {                                                                                                                                                          
+            foreach ($subusecase in $usecase.UseCase) {                                                                                                                                                          
                 $ucObj = New-Object -TypeName PSObject
                 $ucObj | Add-Member -Type NoteProperty -Name Name -Value ("|-- $($subusecase.Name)")
                 $ucObj | Add-Member -Type NoteProperty -Name Result -Value $subusecase.Result
@@ -162,8 +132,7 @@ function Get-CanaryResult
                 $results += $ucObj  
             }
         }
-        else
-        {
+        else {
             $ucObj | Add-Member -Type NoteProperty -Name Name -Value $usecase.Name
             $ucObj | Add-Member -Type NoteProperty -Name Result -Value $usecase.Result
             $ucObj | Add-Member -Type NoteProperty -Name "Duration`n[Seconds]" -Value ((Get-Date $usecase.EndTime) - (Get-Date $usecase.StartTime)).TotalSeconds     
@@ -174,95 +143,83 @@ function Get-CanaryResult
     Log-Info($results | Format-Table -AutoSize)                                               
 }
 
-function Get-CanaryLonghaulResult
-{
+function Get-CanaryLonghaulResult {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true, Position = 0)]
+        [parameter(Mandatory = $true, Position = 0)]
         [ValidateNotNullOrEmpty()]
         [string]$LogPath
     )
 
     $logFiles = (Get-ChildItem -Path $LogPath -Filter *.JSON -File).FullName
     $logContent = @()
-    foreach($file in $logFiles)
-    {
+    foreach ($file in $logFiles) {
         $logContent += (Get-Content -Raw -Path $file | ConvertFrom-Json).UseCases
     }
     $usecasesGroup = $logContent | Group-Object -Property Name
     $usecasesGroup | Format-Table -AutoSize @{Expression = {$_.Name}; Label = "Name"; Align = "Left"},
-                                            @{Expression={$_.Count}; Label="Count"; Align = "Left"},
-                                            @{Expression={$passPct = [math]::Round(((($_.Group | Where-Object Result -eq "PASS" | Measure-Object).Count/$_.Count)*100), 0); $passPct.ToString()+"%"};Label="Pass`n[Goal: >99%]"; Align = "Left"},    
-                                            @{Expression={[math]::Round(($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds} | Measure-Object -Minimum).Minimum, 0)};Label="MinTime`n[msecs]"; Align = "Left"},
-                                            @{Expression={[math]::Round(($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds} | Measure-Object -Maximum).Maximum, 0)};Label="MaxTime`n[msecs]"; Align = "Left"},
-                                            @{Expression={[math]::Round(($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds} | Measure-Object -Average).Average, 0)};Label="AvgTime`n[msecs]"; Align = "Left"},
-                                            @{Expression={$pCount = ($_.Group | Where-Object Result -eq "PASS").Count; $times = ($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds}); $avgTime = ($times | Measure-Object -Average).Average; $sd = 0; foreach ($time in $times){$sd += [math]::Pow(($time - $avgTime), 2)}; [math]::Round([math]::Sqrt($sd/$pCount), 0)};Label="StdDev"; Align = "Left"},
-                                            @{Expression={$pCount = ($_.Group | Where-Object Result -eq "PASS").Count; $times = ($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds}); $avgTime = ($times | Measure-Object -Average).Average; $sd = 0; foreach ($time in $times){$sd += [math]::Pow(($time - $avgTime), 2)}; [math]::Round(([math]::Round([math]::Sqrt($sd/$pCount), 0)/$avgTime), 0) * 100};Label="RelativeStdDev`n[Goal: <50%]"; Align = "Left"}
+    @{Expression = {$_.Count}; Label = "Count"; Align = "Left"},
+    @{Expression = {$passPct = [math]::Round(((($_.Group | Where-Object Result -eq "PASS" | Measure-Object).Count / $_.Count) * 100), 0); $passPct.ToString() + "%"}; Label = "Pass`n[Goal: >99%]"; Align = "Left"},    
+    @{Expression = {[math]::Round(($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds} | Measure-Object -Minimum).Minimum, 0)}; Label = "MinTime`n[msecs]"; Align = "Left"},
+    @{Expression = {[math]::Round(($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds} | Measure-Object -Maximum).Maximum, 0)}; Label = "MaxTime`n[msecs]"; Align = "Left"},
+    @{Expression = {[math]::Round(($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds} | Measure-Object -Average).Average, 0)}; Label = "AvgTime`n[msecs]"; Align = "Left"},
+    @{Expression = {$pCount = ($_.Group | Where-Object Result -eq "PASS").Count; $times = ($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds}); $avgTime = ($times | Measure-Object -Average).Average; $sd = 0; foreach ($time in $times) {$sd += [math]::Pow(($time - $avgTime), 2)}; [math]::Round([math]::Sqrt($sd / $pCount), 0)}; Label = "StdDev"; Align = "Left"},
+    @{Expression = {$pCount = ($_.Group | Where-Object Result -eq "PASS").Count; $times = ($_.Group | Where-Object Result -eq "PASS" | ForEach-Object {((Get-Date $_.EndTime) - (Get-Date $_.StartTime)).TotalMilliseconds}); $avgTime = ($times | Measure-Object -Average).Average; $sd = 0; foreach ($time in $times) {$sd += [math]::Pow(($time - $avgTime), 2)}; [math]::Round(([math]::Round([math]::Sqrt($sd / $pCount), 0) / $avgTime), 0) * 100}; Label = "RelativeStdDev`n[Goal: <50%]"; Align = "Left"}
 }
 
-function Get-CanaryFailureStatus
-{
+function Get-CanaryFailureStatus {
     $logContent = Get-Content -Raw -Path $Global:JSONLogFile | ConvertFrom-Json
-    if ($logContent.Usecases.Result -contains "FAIL")
-    {
+    if ($logContent.Usecases.Result -contains "FAIL") {
         return $true
     }
     return $false
 }
 
-function Start-Scenario
-{
+function Start-Scenario {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true, Position = 0)]
+        [parameter(Mandatory = $true, Position = 0)]
         [ValidateNotNullOrEmpty()]
         [string]$Name,
-        [parameter(Mandatory=$false, Position = 1)]
+        [parameter(Mandatory = $false, Position = 1)]
         [ValidateNotNullOrEmpty()]
         [string]$Type,
-        [parameter(Mandatory=$false)]
+        [parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
         [string]$LogFilename,
-        [parameter(Mandatory=$false)]
+        [parameter(Mandatory = $false)]
         [bool]$ContinueOnFailure = $false,
-        [parameter(Mandatory=$false)]
+        [parameter(Mandatory = $false)]
         [bool]$ListAvailable = $false,
-        [parameter(Mandatory=$false)]
+        [parameter(Mandatory = $false)]
         [string[]]$ExclusionList
     )
 
-    if ($LogFileName)
-    {
-        if ($fileExtension = [IO.Path]::GetExtension($LogFileName))
-        {
+    if ($LogFileName) {
+        if ($fileExtension = [IO.Path]::GetExtension($LogFileName)) {
             $Global:JSONLogFile = $LogFileName.Replace($fileExtension, ".JSON")
             $Global:TxtLogFile = $LogFileName   
         }        
-        else 
-        {
+        else {
             $Global:JSONLogFile = $LogFileName + ".JSON"
             $Global:TxtLogFile = $LogFileName + ".Log"               
         }        
     }
-    if ($Global:wttLogFileName)
-    {
+    if ($Global:wttLogFileName) {
         OpenWTTLogger $Global:wttLogFileName    
     }
-    if ($ListAvailable)
-    {
+    if ($ListAvailable) {
         $Global:listAvailableUsecases = $true
     }
-    if ($ExclusionList)
-    {
+    if ($ExclusionList) {
         $Global:exclusionList = $ExclusionList
     }
-    if (-not $ListAvailable)
-    {
+    if (-not $ListAvailable) {
         New-Item -Path $Global:JSONLogFile -Type File -Force
         New-Item -Path $Global:TxtLogFile -Type File -Force
         $jsonReport = @{
-        "Scenario" = ($Name + "-" + $Type)
-        "UseCases" = @()
+            "Scenario" = ($Name + "-" + $Type)
+            "UseCases" = @()
         }    
         $jsonReport | ConvertTo-Json -Depth 10 | Out-File -FilePath $Global:JSONLogFile
     }
@@ -270,163 +227,169 @@ function Start-Scenario
     $Global:ContinueOnFailure = $ContinueOnFailure
 }
 
-function End-Scenario
-{
-    if ($Global:wttLogFileName)
-    {
+function Start-ParallelJobs {
+    
+    # Run any parallel work
+
+    # find jobs with no dependencies and schedule them
+    $jobsToSchedule = $()
+    Enter-Lock
+    ForEach-Object -InputObject $Global:numDependencies {
+        if ($_.value -eq 0) {
+            $jobsToSchedule = $jobsToSchedule + $_.key
+        }
+    }
+    Exit-Lock
+
+    $jobsRunning = ($Global:runningJobCount -gt 0)
+
+    # start parallel jobs
+    ForEach-Object -InputObject $jobsToSchedule {
+        Start-ParallelJob $_
+    }
+    
+    # Wait for jobs to finish
+    
+    while ($jobRunning) {
+        Start-Sleep -m 100
+        Enter-Lock -Mutex $Global:countMutex
+        $jobsRunning = ($Global:runningJobCount -gt 0)
+        Exit-Lock -Mutex $Global:countMutex
+    }
+}
+
+function End-Scenario {
+
+    Start-ParallelJobs
+
+    if ($Global:wttLogFileName) {
         CloseWTTLogger    
     }
 }
 
-function Enter-Lock {
-    $Global:mutex.WaitOne()
-}
-
-function Exit-lock {
-    $Global:mutex.ReleaseMutex()
-}
-
-# This needs to be done, but is not a test
-function Invoke-Prereq {
-
-}
-
-function Add-Usecase
-{
-    [CmdletBinding()]
-    param (
-        [parameter(Mandatory=$true, Position = 0)]
+function Invoke-Action {
+    param(
+        [parameter(Mandatory = $true, Position = 0)]
         [ValidateNotNullOrEmpty()]
         [string]$Name,
-        
-        [parameter(Mandatory=$false, Position = 1)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Description, 
 
-        [parameter(Mandatory=$true, Position = 2)]
+        [parameter(Mandatory = $true, Position = 1)]
         [ValidateNotNullOrEmpty()]
-        [ScriptBlock]$UsecaseBlock,
-        
-        [parameter(Mandatory=$true, Position = 3)]
-        [string[]]$Prereqs = @()
+        [ScriptBlock]$ActionBlock
     )
     
-    ForEach-Object -InputObject $Prereqs {
-        Enter-Lock
-        $count = $Global:counts[$Name] += 1
-        Exit-lock
-    }
+    Log-Info ("[START] Action: $Name`n") 
 
-    [PSCustomObject]$obj = @{
-        Name            = $Name
-        Description     = $Description
-        UsecaseBlock    = $UsecaseBlock
+    try {
+        Invoke-Command -ScriptBlock $ActionBlock
     }
-    $Global:jobs.Add($Name, $obj)
+    catch [System.Exception] {        
+        Log-Exception ($_.Exception)
+        Log-Info ("###### <FAULTING SCRIPTBLOCK> ######")
+        Log-Info ("$UsecaseBlock")
+        Log-Info ("###### </FAULTING SCRIPTBLOCK> ######")
+        if (-not $Global:ContinueOnFailure) {
+            throw $_.Exception
+        }
+    }
+    finally {
+        Log-Error ("[END] Action: $Name`n")
+    }
 }
 
 function Invoke-UseCase {
-    param(
-        [parameter(Mandatory=$true, Position = 0)]
+    param (
+        [parameter(Mandatory = $true, Position = 0)]
         [ValidateNotNullOrEmpty()]
-        $Object
+        [string]$Name,
+        
+        [parameter(Mandatory = $false, Position = 1)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Description, 
+
+        [parameter(Mandatory = $true, Position = 2)]
+        [ValidateNotNullOrEmpty()]
+        [ScriptBlock]$UsecaseBlock
     )
 
-    [string]$Name               = $Object.Name
-    [string]$Description        = $Object.Description
-    [ScriptBlock]$UsecaseBlock  = $Object.UsecaseBlock
-        
+    $success = $true
 
-    if ($Global:listAvailableUsecases)
-    {
+    if ($Global:listAvailableUsecases) {
         $parentUsecase = $Name
-        if ((Get-PSCallStack)[1].Arguments.Contains($parentUsecase))
-        {
-            "  `t"*([math]::Floor((Get-PSCallStack).Count/3)) + "|-- " + $Name
+        if ((Get-PSCallStack)[1].Arguments.Contains($parentUsecase)) {
+            "  `t" * ([math]::Floor((Get-PSCallStack).Count / 3)) + "|-- " + $Name
         }
-        else
-        {
-
+        else {
             "`t" + $Name
         }
-        if ($UsecaseBlock.ToString().Contains("Invoke-Usecase"))
-        {
-            try {Invoke-Command -ScriptBlock $UsecaseBlock -ErrorAction SilentlyContinue}
-            catch {}
+        if ($UsecaseBlock.ToString().Contains("Invoke-Usecase")) {
+            try { $success = Invoke-Command -ScriptBlock $UsecaseBlock -ErrorAction SilentlyContinue}
+            catch { $success = $false}
         }
-        return
+        return $success
     }
 
-    if (($Global:exclusionList).Contains($Name))
-    {
+    if (($Global:exclusionList).Contains($Name)) {
         Log-Info ("Skipping Usecase: $Name")
         return
     }
     Log-Info ("[START] Usecase: $Name`n") 
-    if ($Global:wttLogFileName)
-    {
+    if ($Global:wttLogFileName) {
         StartTest "CanaryGate:$Name"
     }
 
-    if ($Description)
-    {
+    if ($Description) {
         Log-Info ("[DESCRIPTION] $Description`n")        
     }
 
-    try
-    {
+    try {
         $result = Invoke-Command -ScriptBlock $UsecaseBlock
-        if ($result -and (-not $UsecaseBlock.ToString().Contains("Invoke-Usecase")))
-        {
+        if ($result -and (-not $UsecaseBlock.ToString().Contains("Invoke-Usecase"))) {
             Log-Info ($result)
         }
-        if ($Global:wttLogFileName)
-        {
+        if ($Global:wttLogFileName) {
             EndTest "CanaryGate:$Name" $true
         }
         Log-Info ("[END] [RESULT = PASS] Usecase: $Name`n")
         return $result | Out-Null
     }
-    catch [System.Exception]
-    {        
+    catch [System.Exception] {        
         Log-Exception ($_.Exception)
         Log-Info ("###### <FAULTING SCRIPTBLOCK> ######")
         Log-Info ("$UsecaseBlock")
         Log-Info ("###### </FAULTING SCRIPTBLOCK> ######")
         Log-Error ("[END] [RESULT = FAIL] Usecase: $Name`n")
-        if ($Global:wttLogFileName)
-        {
+        if ($Global:wttLogFileName) {
             EndTest "CanaryGate:$Name" $false
         }
-        if (-not $Global:ContinueOnFailure)
-        {
+        if (-not $Global:ContinueOnFailure) {
             throw $_.Exception
         }
+        return $false
     }
 }
 
-function GetAzureStackEndpoints
-{
+function GetAzureStackEndpoints {
     [CmdletBinding()]
     param( 
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$EnvironmentDomainFQDN,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$ArmEndpoint
 
     ) 
 
-    $aadTenantId    = $AADTenantId
+    $aadTenantId = $AADTenantId
     $endptres = Invoke-RestMethod "${armEndpoint}/metadata/endpoints?api-version=1.0" -ErrorAction Stop    
     $ActiveDirectoryEndpoint = $($endptres.authentication.loginEndpoint).TrimEnd("/") + "/"
     $ActiveDirectoryServiceEndpointResourceId = $($endptres.authentication.audiences[0])
     $ResourceManagerEndpoint = $armEndpoint
     $GalleryEndpoint = $endptres.galleryEndpoint
     $GraphEndpoint = $endptres.graphEndpoint
-    $AzureKeyVaultDnsSuffix="vault.$EnvironmentDomainFQDN".ToLowerInvariant()
-    $AzureKeyVaultServiceEndpointResourceId= $("https://vault.$EnvironmentDomainFQDN".ToLowerInvariant()) 
+    $AzureKeyVaultDnsSuffix = "vault.$EnvironmentDomainFQDN".ToLowerInvariant()
+    $AzureKeyVaultServiceEndpointResourceId = $("https://vault.$EnvironmentDomainFQDN".ToLowerInvariant()) 
     $StorageEndpointSuffix = $EnvironmentDomainFQDN
 
     $asEndpointsObj = New-Object -TypeName PSObject
@@ -442,28 +405,27 @@ function GetAzureStackEndpoints
     return $asEndpointsObj
 }
 
-function NewSubscriptionsQuota
-{
+function NewSubscriptionsQuota {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AdminUri,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $SubscriptionId,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AzureStackToken,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $ArmLocation  
     )    
 
     $getSubscriptionsQuota = @{
-        Uri = "{0}/subscriptions/{1}/providers/Microsoft.Subscriptions.Admin/locations/{2}/quotas?api-version=2015-11-01" -f $AdminUri, $SubscriptionId, $ArmLocation
-        Method = "GET"
-        Headers = @{ "Authorization" = "Bearer " + $AzureStackToken }
+        Uri         = "{0}/subscriptions/{1}/providers/Microsoft.Subscriptions.Admin/locations/{2}/quotas?api-version=2015-11-01" -f $AdminUri, $SubscriptionId, $ArmLocation
+        Method      = "GET"
+        Headers     = @{ "Authorization" = "Bearer " + $AzureStackToken }
         ContentType = "application/json"
     }
     $subscriptionsQuota = Invoke-RestMethod @getSubscriptionsQuota
@@ -471,28 +433,27 @@ function NewSubscriptionsQuota
     $subscriptionsQuota.value.Id        
 }
 
-function NewStorageQuota
-{
+function NewStorageQuota {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AdminUri,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $SubscriptionId,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AzureStackToken,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $ArmLocation  
     )    
 
-    $quotaName                  = "ascanarystoragequota"
-    $capacityInGb               = 1000
-    $numberOfStorageAccounts    = 200
-    $ApiVersion                 = "2015-12-01-preview"
+    $quotaName = "ascanarystoragequota"
+    $capacityInGb = 1000
+    $numberOfStorageAccounts = 200
+    $ApiVersion = "2015-12-01-preview"
 
     $uri = "{0}/subscriptions/{1}/providers/Microsoft.Storage.Admin/locations/{2}/quotas/{3}?api-version={4}" -f $AdminUri, $SubscriptionId, $ArmLocation, $quotaName, $ApiVersion
     $RequestBody = @"
@@ -505,35 +466,34 @@ function NewStorageQuota
         }
     }
 "@
-    $headers = @{ "Authorization" = "Bearer "+ $AzureStackToken }
+    $headers = @{ "Authorization" = "Bearer " + $AzureStackToken }
     $storageQuota = Invoke-RestMethod -Method Put -Uri $uri -Body $RequestBody -ContentType 'application/json' -Headers $headers
         
     $storageQuota.Id        
 }
 
-function NewComputeQuota
-{
+function NewComputeQuota {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AdminUri,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $SubscriptionId,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AzureStackToken,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $ArmLocation  
     )  
 
-    $quotaName      = "ascanarycomputequota"
-    $vmCount        = 100
-    $memoryLimitMB  = 102400
-    $coresLimit     = 100
-    $ApiVersion     = "2015-12-01-preview"
+    $quotaName = "ascanarycomputequota"
+    $vmCount = 100
+    $memoryLimitMB = 102400
+    $coresLimit = 100
+    $ApiVersion = "2015-12-01-preview"
 
     $uri = "{0}/subscriptions/{1}/providers/Microsoft.Compute.Admin/locations/{2}/quotas/{3}?api-version={4}" -f $AdminUri, $SubscriptionId, $ArmLocation, $quotaName, $ApiVersion
     $RequestBody = @"
@@ -548,42 +508,41 @@ function NewComputeQuota
         }
     }
 "@
-    $headers = @{ "Authorization" = "Bearer "+ $AzureStackToken }
+    $headers = @{ "Authorization" = "Bearer " + $AzureStackToken }
     $computeQuota = Invoke-RestMethod -Method Put -Uri $uri -Body $RequestBody -ContentType 'application/json' -Headers $headers
         
     $computeQuota.Id        
 }
 
-function NewNetworkQuota
-{
+function NewNetworkQuota {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AdminUri,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $SubscriptionId,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AzureStackToken,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $ArmLocation  
     ) 
 
-    $quotaName                      = "ascanarynetworkquota"
-    $publicIpsPerSubscription       = 50
-    $vNetsPerSubscription           = 50
-    $gatewaysPerSubscription        = 1
-    $connectionsPerSubscription     = 2
-    $loadBalancersPerSubscription   = 50
-    $nicsPerSubscription            = 100
-    $securityGroupsPerSubscription  = 50
-    $ApiVersion                     = "2015-06-15"
+    $quotaName = "ascanarynetworkquota"
+    $publicIpsPerSubscription = 50
+    $vNetsPerSubscription = 50
+    $gatewaysPerSubscription = 1
+    $connectionsPerSubscription = 2
+    $loadBalancersPerSubscription = 50
+    $nicsPerSubscription = 100
+    $securityGroupsPerSubscription = 50
+    $ApiVersion = "2015-06-15"
     
     $uri = "{0}/subscriptions/{1}/providers/Microsoft.Network.Admin/locations/{2}/quotas/{3}?api-version={4}" -f $AdminUri, $SubscriptionId, $ArmLocation, $quotaName, $ApiVersion
-    $id = "/subscriptions/{0}/providers/Microsoft.Network.Admin/locations/{1}/quotas/{2}" -f  $SubscriptionId, $ArmLocation, $quotaName
+    $id = "/subscriptions/{0}/providers/Microsoft.Network.Admin/locations/{1}/quotas/{2}" -f $SubscriptionId, $ArmLocation, $quotaName
     $RequestBody = @"
     {
         "id":"$id",
@@ -601,51 +560,49 @@ function NewNetworkQuota
         }
     }
 "@
-    $headers = @{ "Authorization" = "Bearer "+ $AzureStackToken}
+    $headers = @{ "Authorization" = "Bearer " + $AzureStackToken}
     $networkQuota = Invoke-RestMethod -Method Put -Uri $uri -Body $RequestBody -ContentType 'application/json' -Headers $headers
         
     $networkQuota.Id       
 }
 
-function NewKeyVaultQuota
-{
+function NewKeyVaultQuota {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AdminUri,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $SubscriptionId,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $AzureStackToken,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]    
         [string] $ArmLocation  
     ) 
 
     $uri = "{0}/subscriptions/{1}/providers/Microsoft.Keyvault.Admin/locations/{2}/quotas?api-version=2017-02-01-preview" -f $AdminUri, $SubscriptionId, $ArmLocation
-    $headers = @{ "Authorization" = "Bearer "+ $AzureStackToken }
+    $headers = @{ "Authorization" = "Bearer " + $AzureStackToken }
     $kvQuota = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -ContentType 'application/json' -ErrorAction Stop
         
     $kvQuota.Value.Id
 }
 
-function NewAzureStackToken
-{
+function NewAzureStackToken {
     [CmdletBinding()]
     param(         
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$AADTenantID, 
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$EnvironmentDomainFQDN,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [System.Management.Automation.PSCredential]$Credentials,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$ArmEndpoint
 
@@ -654,38 +611,37 @@ function NewAzureStackToken
     $endpoints = GetAzureStackEndpoints -EnvironmentDomainFQDN $EnvironmentDomainFQDN -ArmEndPoint $ArmEndpoint
     $clientId = "1950a258-227b-4e31-a9cf-717495945fc2"
     
-    $contextAuthorityEndpoint = ([System.IO.Path]::Combine($endpoints.ActiveDirectoryEndpoint, $AADTenantID)).Replace('\','/')
+    $contextAuthorityEndpoint = ([System.IO.Path]::Combine($endpoints.ActiveDirectoryEndpoint, $AADTenantID)).Replace('\', '/')
     $authContext = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext($contextAuthorityEndpoint, $false)
     $userCredential = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.UserCredential($Credentials.UserName, $Credentials.Password)
     return ($authContext.AcquireToken($endpoints.ActiveDirectoryServiceEndpointResourceId, $clientId, $userCredential)).AccessToken  
 }
 
-function NewAzureStackDefaultQuotas
-{
+function NewAzureStackDefaultQuotas {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$ResourceLocation,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$SubscriptionId,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$AADTenantID, 
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$EnvironmentDomainFQDN,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [System.Management.Automation.PSCredential]$Credentials,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$ArmEndpoint
     ) 
 
-    $aadTenantId    = $AADTenantId
-    $serviceQuotas  = @()
+    $aadTenantId = $AADTenantId
+    $serviceQuotas = @()
     $asToken = NewAzureStackToken -AADTenantId $AADTenantId -EnvironmentDomainFQDN $EnvironmentDomainFQDN -Credentials $Credentials -ArmEndpoint $ArmEndpoint
     #$serviceQuotas += NewSubscriptionsQuota -AdminUri $armEndpoint -SubscriptionId $SubscriptionId -AzureStackToken $asToken -ArmLocation $ResourceLocation
     $serviceQuotas += NewStorageQuota -AdminUri $armEndPoint -SubscriptionId $SubscriptionId -AzureStackToken $asToken -ArmLocation $ResourceLocation
@@ -696,23 +652,21 @@ function NewAzureStackDefaultQuotas
     $serviceQuotas    
 }
 
-function NewAzureStackDSCScriptResource
-{
+function NewAzureStackDSCScriptResource {
     [CmdletBinding()]
     param( 
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$DSCScriptResourceName,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$DestinationPath,
-        [parameter(Mandatory=$false)]
+        [parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
         [string]$DSCScript     
     )
 
-    if (-not $DSCScript)
-    {
+    if (-not $DSCScript) {
         $DSCScript = "Configuration ASCheckNetworkConnectivityUtil 
         {    
             Node localhost 
@@ -733,8 +687,7 @@ function NewAzureStackDSCScriptResource
             }
         }"
     }
-    if (-not (Test-Path -Path $DestinationPath))
-    {
+    if (-not (Test-Path -Path $DestinationPath)) {
         New-Item -Path $DestinationPath -ItemType Directory -Force
     }
     $destinationDSCScriptPath = Join-Path -Path $DestinationPath -ChildPath $DSCScriptResourceName
@@ -747,23 +700,21 @@ function NewAzureStackDSCScriptResource
     $dscZipPath   
 }
 
-function NewAzureStackCustomScriptResource
-{
+function NewAzureStackCustomScriptResource {
     [CmdletBinding()]
     param( 
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$CustomScriptResourceName,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$DestinationPath,
-        [parameter(Mandatory=$false)]
+        [parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
         [string]$CustomScript     
     )
 
-    if (-not $CustomScript)
-    {
+    if (-not $CustomScript) {
         $CustomScript = "Write-Output `"Disable firewall`"
                         netsh advfirewall set privateprofile state off;
 
@@ -785,8 +736,7 @@ function NewAzureStackCustomScriptResource
                             Write-Error `"Found no data disk(s) attached to the VM`"
                         }"
     }
-    if (-not (Test-Path -Path $DestinationPath))
-    {
+    if (-not (Test-Path -Path $DestinationPath)) {
         New-Item -Path $DestinationPath -ItemType Directory -Force
     }
     $destinationCustomScriptPath = Join-Path -Path $DestinationPath -ChildPath $CustomScriptResourceName
@@ -795,14 +745,13 @@ function NewAzureStackCustomScriptResource
     $destinationCustomScriptPath    
 }
 
-function NewAzureStackDataVHD
-{
+function NewAzureStackDataVHD {
     [CmdletBinding()]
     param(
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$FilePath,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [int]$VHDSizeInGB
     )
@@ -812,97 +761,83 @@ function NewAzureStackDataVHD
     "CREATE VDISK FILE=`"$FilePath`" MAXIMUM=$vhdSizeInBytes" | Out-File -FilePath "$tmpPath\CreateASDataDisk.txt" -Encoding ascii
     cmd /c diskpart /s "$tmpPath\CreateASDataDisk.txt"
 
-    if (Test-Path $FilePath)
-    {
+    if (Test-Path $FilePath) {
         Remove-Item -Path "$tmpPath\CreateASDataDisk.txt" -Force
     }
-    else 
-    {
+    else {
         throw [System.Exception]"Failed to create the VHD file"    
     }
 
     return $FilePath        
 }
 
-function GetAzureStackBlobUri
-{
+function GetAzureStackBlobUri {
     [CmdletBinding()]
     param(        
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$ResourceGroupName,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$BlobContent,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$StorageAccountName,
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$StorageContainerName
     )
 
-    try 
-    {
-        if (-not (Get-AzureRmStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName))
-        {
+    try {
+        if (-not (Get-AzureRmStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName)) {
             throw [System.Exception]"Storage account $StorageAccountName does not exist"
         }
         $asStorageAccountKey = Get-AzureRmStorageAccountKey -ResourceGroupName $ResourceGroupName -Name $StorageAccountName -ErrorAction Stop
-        if ($asStorageAccountKey)
-        {
+        if ($asStorageAccountKey) {
             $storageAccountKey = $asStorageAccountKey.Key1
         }
         $asStorageContext = New-AzureStorageContext -StorageAccountName $StorageAccountName -StorageAccountKey $storageAccountKey -ErrorAction Stop
-        if (-not ($blobUri = (Get-AzureStorageBlob  -Blob $BlobContent -Container $StorageContainerName -Context $asStorageContext -ErrorAction Stop).ICloudBlob.uri.AbsoluteUri))
-        {
+        if (-not ($blobUri = (Get-AzureStorageBlob  -Blob $BlobContent -Container $StorageContainerName -Context $asStorageContext -ErrorAction Stop).ICloudBlob.uri.AbsoluteUri)) {
             throw [System.Exception]"Failed to retrieve the blob content Uri"
         }
 
         return $blobUri        
     }
-    catch [System.Exception] 
-    {
+    catch [System.Exception] {
         throw $_.Exception.Message    
     }
 }
 
-function DownloadFile
-{
+function DownloadFile {
     param
     (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [String] $FileUrl,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [String] $OutputFolder
     )
     $retries = 20
     $lastException = $null
     $success = $false
     
-    while($success -eq $false -and $retries -ge 0)
-    {
+    while ($success -eq $false -and $retries -ge 0) {
         $success = $true
-        try 
-        {
+        try {
             $outputFile = Join-Path $OutputFolder (Split-Path -Path $FileUrl -Leaf)
             $wc = New-Object System.Net.WebClient
             $wc.DownloadFile($FileUrl, $outputFile) | Out-Null
         }
-        catch
-        {
+        catch {
             $success = $false            
             $lastException = $_
         }
         $retries--
-        if($success -eq $false)
-        {
+        if ($success -eq $false) {
             Start-Sleep -Seconds 10                        
         }
     }
 
-    if($success -eq $false)
-    {
+    if ($success -eq $false) {
         Write-Output "Timed out trying to download $FileUrl"
         throw $lastException
     }
@@ -910,29 +845,276 @@ function DownloadFile
     return $outputFile
 }
 
-function CopyImage
-{
+function CopyImage {
     param
     (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [String] $ImagePath,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [String] $OutputFolder
     )
 
-    if (Test-Path $ImagePath)
-    {
+    if (Test-Path $ImagePath) {
         Copy-Item $ImagePath $OutputFolder
         $outputfile = Join-Path $OutputFolder (Split-Path $ImagePath -Leaf)
     }
-    elseif ($ImagePath.StartsWith("http"))
-    {
+    elseif ($ImagePath.StartsWith("http")) {
         $outputfile = DownloadFile -FileUrl $ImagePath -OutputFolder $OutputFolder
     }
-    if (([System.IO.FileInfo]$outputfile).Extension -eq ".zip")
-    {
+    if (([System.IO.FileInfo]$outputfile).Extension -eq ".zip") {
         Expand-Archive -Path $outputfile -DestinationPath $OutputFolder -Force   
     }
 
     return (Get-ChildItem -Path $OutputFolder -File | Where-Object {$_.Extension -eq ".vhd" -or $_.Extension -eq ".vhdx"})[0].FullName
 }
+
+function Get-RemoteSession {
+    param(
+        [parameter(Mandatory = $true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        $ComputerName,
+
+        [parameter(Mandatory = $true, Position = 1)]
+        [ValidateNotNullOrEmpty()]
+        [System.Management.Automation.PSCredential]$Credential,
+
+        [parameter(Mandatory = $false, Position = 2)]
+        [string]$ErrorMessage = "Unable to establish a remote session to the VM using the IP"
+    )
+    $sw = [system.diagnostics.stopwatch]::startNew(); 
+    while (-not($session = New-PSSession -ComputerName $ComputerName -Credential $Credential -ErrorAction SilentlyContinue)) {
+        if (($sw.ElapsedMilliseconds -gt 240000) -and (-not($session))) {
+            $sw.Stop(); 
+            throw [System.Exception]$ErrorMessage
+        }; 
+        Start-Sleep -Seconds 15
+    };
+    $session
+}
+
+#########################################
+#                                       #
+#                                       #
+#                                       #
+#           Parallelization Code        #
+#                                       #
+#                                       #
+#                                       #
+#                                       #
+#########################################
+
+
+
+
+
+
+# Locks
+$Global:mutex = New-Object System.Threading.Mutex
+$Global:countMutex = New-Object System.Threading.Mutex
+
+# "TestName" -> How many actions it depends on
+$Global:numDependencies = @{}
+
+# "UsecaseName" -> { "UseCaseDependent" , }
+$Global:UsecaseDependencies = @{}
+
+# list of jobs to run when dependencies met
+$Global:jobs = @{}
+
+# current list of jobs running
+$Global:runningJobCount = 0
+
+function Enter-Lock {
+    param(
+        [ValidateNotNullOrEmpty()]
+        [System.Threading.Mutex]$Mutex = $Global:mutex
+    )
+    $Mutex.WaitOne()
+}
+
+function Exit-lock {
+    param(
+        [ValidateNotNullOrEmpty()]
+        [System.Threading.Mutex]$Mutex = $Global:mutex
+    )
+    $Mutex.ReleaseMutex()
+}
+
+function Start-ParallelJob {
+    param(
+        [parameter(Mandatory = $true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name
+    )
+
+    
+    # signal we are running
+    Enter-Lock -Mutex $Global:countMutex
+    $Global:runningJobCount += 1
+    Exit-Lock  -Mutex $Global:countMutex
+
+    $job = $Global:jobs[$Name]
+    Start-Job $job
+
+}
+
+function Add-Job {
+    param(
+        [parameter(Mandatory = $true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [parameter(Mandatory = $true, Position = 2)]
+        [ValidateNotNullOrEmpty()]
+        [ScriptBlock]$Script,
+        
+        [parameter(Mandatory = $true, Position = 3)]
+        [string[]]$Prereqs = @()
+    )
+
+    # Make sure shared data-structures cannot be trashed
+    Enter-Lock
+
+    try {
+
+        # Intialize how many remaining need to finish before I can start
+        $Global:numDependencies[$Name] = $Prereqs.Length
+        
+        # Add me to dependencies so that when all are finished 
+        # we can start me
+        ForEach-Object -InputObject $Prereqs {
+            $Global:UsecaseDependencies.Get($_) += $Name
+        }
+    
+        $job = {
+
+            # run  it
+            Invoke-Command $Block
+    
+            # decrement dependency counts for each dependent, if we reach 0
+            # then we can start the next job.
+            Enter-Lock
+            ForEach-Object -InputObject $Global:UsecaseDependencies {
+                $Global:numDependencies[$_] -= 1
+                if ($Global:numDependencies[$_] -eq 0) {
+                    Start-ParallelJob $_
+                }
+            }
+            Exit-lock
+
+            # Signal that this job has completed
+            Enter-Lock -Mutex $Global:countMutex
+            $Global:runningJobCount -= 1
+            Exit-Lock  -Mutex $Global:countMutex
+        }
+        $Global:jobs.Add($Name, $job)
+    }
+    catch {
+        throw
+    }
+    finally {
+        Exit-lock
+    }
+}
+
+<#
+.SYNOPSIS
+Add a UseCase to the list of UseCases to run in parallel.  
+
+.DESCRIPTION
+Given a Usecase and a list of dependencies we add this Useacase
+to the list of parallel usecases.  When all dependencies are met
+then this usecase is executed.
+
+.PARAMETER Name
+The name of the usecase
+
+.PARAMETER Description
+A description of the usecase
+
+.PARAMETER UsecaseBlock
+The usecase script block
+
+.PARAMETER Prereqs
+A list of prerequisites for this use case
+
+.EXAMPLE
+Add-UseCase -Name "CreateStorageAccount" -Description "Create a storage account" -Prereqs "CreateAzureStackEnvironment,CreateResourceGroup"
+
+.NOTES
+
+#>
+function Add-Usecase {
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory = $true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+        
+        [parameter(Mandatory = $false, Position = 1)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Description, 
+
+        [parameter(Mandatory = $true, Position = 2)]
+        [ValidateNotNullOrEmpty()]
+        [ScriptBlock]$UsecaseBlock,
+        
+        [parameter(Mandatory = $false, Position = 3)]
+        [string[]]$Prereqs = @()
+    )
+    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-UseCase -Name $Name -Description $Description -UsecaseBlock $UsecaseBlock }
+}
+
+<#
+.SYNOPSIS
+Add an action to the list of parallel work.
+
+.DESCRIPTION
+Given an action and a list of dependencies we add this action
+to the list of parallel actions.  When all dependencies are met
+then this action is executed.
+
+.PARAMETER Name
+The name of the action
+
+.PARAMETER ActionBlock
+The script block that will be executed
+
+.PARAMETER Prereqs
+The list of prerequisited for this action.
+
+.EXAMPLE
+Add-Action -Name "CreateAzureStackAdminEnvironment" -ActionBlock {
+    $asEndpoints = GetAzureStackEndpoints -EnvironmentDomainFQDN $EnvironmentDomainFQDN -ArmEndpoint $AdminArmEndpoint 
+    Add-AzureRmEnvironment  -Name ($SvcAdminEnvironmentName) `
+    -ActiveDirectoryEndpoint ($asEndpoints.ActiveDirectoryEndpoint) `
+    -ActiveDirectoryServiceEndpointResourceId ($asEndpoints.ActiveDirectoryServiceEndpointResourceId) `
+    -ResourceManagerEndpoint ($asEndpoints.ResourceManagerEndpoint) `
+    -GalleryEndpoint ($asEndpoints.GalleryEndpoint) `
+    -GraphEndpoint ($asEndpoints.GraphEndpoint) `
+    -GraphAudience ($asEndpoints.GraphEndpoint) `
+    -StorageEndpointSuffix ($asEndpoints.StorageEndpointSuffix) `
+    -AzureKeyVaultDnsSuffix ($asEndpoints.AzureKeyVaultDnsSuffix) `
+    -EnableAdfsAuthentication:$asEndpoints.ActiveDirectoryEndpoint.TrimEnd("/").EndsWith("/adfs", [System.StringComparison]::OrdinalIgnoreCase) `
+    -ErrorAction Stop
+}
+
+.NOTES
+General notes
+#>
+function Add-Action {
+    param(
+        [parameter(Mandatory = $true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [parameter(Mandatory = $true, Position = 1)]
+        [ValidateNotNullOrEmpty()]
+        [ScriptBlock]$ActionBlock,
+        
+        [parameter(Mandatory = $true, Position = 3)]
+        [string[]]$Prereqs = @()
+    )
+    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-Action -Name $Name -ActionBlock $ActionBlock }
+}
+
