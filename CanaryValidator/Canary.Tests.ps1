@@ -108,10 +108,16 @@ param (
     [parameter(HelpMessage = "Lists the available usecases in Canary")]
     [Parameter(ParameterSetName = "listavl", Mandatory = $true)]
     [ValidateNotNullOrEmpty()]  
-    [switch]$ListAvailable     
+    [switch]$ListAvailable,
+    [parameter(HelpMessage = "Simulates Canary")]
+    [ValidateNotNullOrEmpty()]  
+    [switch]$DryRun = $true
 )
 
 Import-Module -Name $PSScriptRoot\Canary.Utilities.psm1 -Force -DisableNameChecking
+
+$Global:dryRun = $DryRun
+
 if (-not $ListAvailable.IsPresent) {
     #requires -Modules AzureRM.Profile, AzureRM.AzureStackAdmin
     #Requires -RunAsAdministrator
@@ -168,7 +174,6 @@ while ($runCount -le $NumberOfIterations) {
 
     Add-Usecase -Name "InitializeAdminSession" -Description "Create the admin environment, login, and select subscription" -UsecaseBlock `
     {
-
         Invoke-Usecase -Name 'GetAzureStackAdminEndpoints' -Description "Get Endpoints from admin ARM endpoint $AdminArmEndpoint" -UsecaseBlock `
         {
             $asEndpoints = GetAzureStackEndpoints -EnvironmentDomainFQDN $EnvironmentDomainFQDN -ArmEndpoint $AdminArmEndpoint
@@ -204,7 +209,7 @@ while ($runCount -le $NumberOfIterations) {
         } 
     }
     
-    Add-Usecase -Name "ListAzureStackInformation" -Description "List information pertaining to Azure Stack instance" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+    Add-Usecase -Name "ListAzureStackInformation" -Description "List information pertaining to Azure Stack instance" -DependsOn "InitializeAdminSession" -UsecaseBlock `
     {
         Invoke-Usecase -Name 'ListFabricResourceProviderInfo' -Description "List FabricResourceProvider(FRP) information like storage shares, capacity, logical networks etc." -UsecaseBlock `
         {
@@ -292,7 +297,7 @@ while ($runCount -le $NumberOfIterations) {
     }
 
     if ($WindowsISOPath) {
-        Add-Usecase -Name 'UploadWindows2016ImageToPIR' -Description "Uploads a windows server 2016 image to the PIR" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+        Add-Usecase -Name 'UploadWindows2016ImageToPIR' -Description "Uploads a windows server 2016 image to the PIR" -DependsOn "InitializeAdminSession" -UsecaseBlock `
         {
             if (-not (Get-AzureRmVMImage -Location $ResourceLocation -PublisherName "MicrosoftWindowsServer" -Offer "WindowsServer" -Sku "2016-Datacenter-Core" -ErrorAction SilentlyContinue)) {
                 New-AzsServer2016VMImage -ISOPath $WindowsISOPath -Location $ResourceLocation -Version Core -CreateGalleryItem $false
@@ -300,7 +305,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Action -Name "UploadLinuxImage" -Prereqs "InitializeAdminSession" -ActionBlock {
+    Add-Action -Name "UploadLinuxImage" -DependsOn "InitializeAdminSession" -ActionBlock {
         if ((Get-Volume ((Get-Item -Path $ENV:TMP).PSDrive.Name)).SizeRemaining / 1GB -gt 35) {
             [boolean]$invalidUri = $false
             try {Invoke-WebRequest -Uri $LinuxImagePath -UseBasicParsing -DisableKeepAlive -Method Head -ErrorAction SilentlyContinue | Out-Null} 
@@ -331,7 +336,7 @@ while ($runCount -le $NumberOfIterations) {
     }
 
     if (($TenantAdminCredentials) -or ($ListAvailable)) {
-        Add-Usecase -Name "ValidateAdminOperationsThroughTenant" -Description "Test that Admin operations are visible from Tenant" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+        Add-Usecase -Name "ValidateAdminOperationsThroughTenant" -Description "Test that Admin operations are visible from Tenant" -DependsOn "InitializeAdminSession" -UsecaseBlock `
         {
             $subscriptionRGName = $CanaryUtilitiesRG + "subscrrg" + [Random]::new().Next(1, 999)
             $tenantPlanName = $CanaryUtilitiesRG + "tenantplan" + [Random]::new().Next(1, 999)        
@@ -359,7 +364,7 @@ while ($runCount -le $NumberOfIterations) {
                     -ErrorAction Stop
             }
 
-            Invoke-Usecase -Name 'CreateResourceGroupForTenantSubscription' -Description "Create a resource group $subscriptionRGName for the tenant subscription" -Prereqs "CreateTenantAzureStackEnv" -UsecaseBlock `
+            Invoke-Usecase -Name 'CreateResourceGroupForTenantSubscription' -Description "Create a resource group $subscriptionRGName for the tenant subscription" -DependsOn "CreateTenantAzureStackEnv" -UsecaseBlock `
             {        
                 if (Get-AzureRmResourceGroup -Name $subscriptionRGName -ErrorAction SilentlyContinue) {
                     Remove-AzureRmResourceGroup -Name $subscriptionRGName -Force -ErrorAction Stop
@@ -567,10 +572,9 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-
-    Add-Usecase -Name "CreateResourceGroups" -Description "Create resource groups used by tests" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+    Add-Usecase -Name "CreateResourceGroups" -Description "Create resource groups used by tests" -DependsOn "InitializeAdminSession" -UsecaseBlock `
     {
-        Invoke-Usecase -Name 'CreateResourceGroupForUtilities' -Description "Create a resource group $CanaryUtilitiesRG for the placing the utility files" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+        Invoke-Usecase -Name 'CreateResourceGroupForUtilities' -Description "Create a resource group $CanaryUtilitiesRG for the placing the utility files" -DependsOn "InitializeAdminSession" -UsecaseBlock `
         {        
             if (Get-AzureRmResourceGroup -Name $CanaryUtilitiesRG -ErrorAction SilentlyContinue) {
                 Remove-AzureRmResourceGroup -Name $CanaryUtilitiesRG -Force -ErrorAction Stop
@@ -578,7 +582,7 @@ while ($runCount -le $NumberOfIterations) {
             New-AzureRmResourceGroup -Name $CanaryUtilitiesRG -Location $ResourceLocation -ErrorAction Stop 
         }
     
-        Invoke-Usecase -Name "CreateResourceGroupForVMs" -Description "Create a resource group $CanaryVMRG for the placing the VMs and corresponding resources" -Prereqs "CreateAdminAzureStackEnv" -UsecaseBlock `
+        Invoke-Usecase -Name "CreateResourceGroupForVMs" -Description "Create a resource group $CanaryVMRG for the placing the VMs and corresponding resources" -DependsOn "CreateAdminAzureStackEnv" -UsecaseBlock `
         {        
             if (Get-AzureRmResourceGroup -Name $CanaryVMRG -ErrorAction SilentlyContinue) {
                 Remove-AzureRmResourceGroup -Name $CanaryVMRG -Force -ErrorAction Stop
@@ -587,7 +591,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name "InitializeStorage" -Description "Create and Initialize Storage" -Prereqs "CreateResourceGroups" -UsecaseBlock `
+    Add-Usecase -Name "InitializeStorage" -Description "Create and Initialize Storage" -DependsOn "CreateResourceGroups" -UsecaseBlock `
     {
         Invoke-Usecase -Name 'CreateStorageAccountForUtilities' -Description "Create a storage account for the placing the utility files" -UsecaseBlock `
         {      
@@ -607,7 +611,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name "CreateScripts" -Description "Create scripts used by VMs" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+    Add-Usecase -Name "CreateScripts" -Description "Create scripts used by VMs" -DependsOn "InitializeAdminSession" -UsecaseBlock `
     {
 
         Invoke-Usecase -Name 'CreateDSCScriptResourceUtility' -Description "Create a DSC script resource that checks for internet connection" -UsecaseBlock `
@@ -626,13 +630,13 @@ while ($runCount -le $NumberOfIterations) {
 
     }
 
-    Add-Usecase -Name 'CreateDataDiskForVM' -Description "Create a data disk to be attached to the VMs" -Prereqs "InitializeAdminSession" -UsecaseBlock `
+    Add-Usecase -Name 'CreateDataDiskForVM' -Description "Create a data disk to be attached to the VMs" -DependsOn "InitializeAdminSession" -UsecaseBlock `
     {      
         $vhdPath = Join-Path -Path $canaryUtilPath -Childpath "VMDataDisk.VHD"
         NewAzureStackDataVHD -FilePath $vhdPath -VHDSizeInGB 1
     }
         
-    Add-Usecase -Name 'UploadUtilitiesToBlobStorage' -Description "Upload the canary utilities to the blob storage" -Prereqs "InitializeStorage" -UsecaseBlock `
+    Add-Usecase -Name 'UploadUtilitiesToBlobStorage' -Description "Upload the canary utilities to the blob storage" -DependsOn "InitializeStorage" -UsecaseBlock `
     {    
         try {  
             $asStorageAccountKey = Get-AzureRmStorageAccountKey -ResourceGroupName $CanaryUtilitiesRG -Name $storageAccName -ErrorAction Stop
@@ -659,7 +663,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'CreateKeyVaultStoreForCertSecret' -Description "Create a key vault store to put the certificate secret" -Prereqs "CreateResourceGroups" -UsecaseBlock `
+    Add-Usecase -Name 'CreateKeyVaultStoreForCertSecret' -Description "Create a key vault store to put the certificate secret" -DependsOn "CreateResourceGroups" -UsecaseBlock `
     {      
         if ($certExists = Get-ChildItem -Path "cert:\LocalMachine\My" | Where-Object Subject -Match $keyvaultCertName) {
             $certExists | Remove-Item -Force
@@ -692,7 +696,7 @@ while ($runCount -le $NumberOfIterations) {
     [string]$osVersion = $null
     [boolean]$linuxImgExists = $null
 
-    Add-Usecase -Name 'QueryImagesFromPIR' -Description "Queries the images in Platform Image Repository to retrieve the OS Version to deploy on the VMs" -Prereqs "UploadLinuxImage" -UsecaseBlock `
+    Add-Usecase -Name 'QueryImagesFromPIR' -Description "Queries the images in Platform Image Repository to retrieve the OS Version to deploy on the VMs" -DependsOn "UploadLinuxImage" -UsecaseBlock `
     {
         $osVersion = ""
         [boolean]$linuxImgExists = $false
@@ -730,7 +734,7 @@ while ($runCount -le $NumberOfIterations) {
         Set-Variable -Scope 1 -Name "linuxImgExists" -Value $linuxImgExists
     }
     
-    Add-UseCase -Name "ArmTemplates" -Description "Deploy ARM template and retrieve deployment times" -Prereqs "InitializeStorage", "QueryImagesFromPIR", "CreateKeyVaultStoreForCertSecret", "CreateResourceGroups" -UsecaseBlock `
+    Add-UseCase -Name "ArmTemplates" -Description "Deploy ARM template and retrieve deployment times" -DependsOn "InitializeStorage", "QueryImagesFromPIR", "CreateKeyVaultStoreForCertSecret", "CreateResourceGroups" -UsecaseBlock `
     {
         Invoke-Usecase -Name 'DeployARMTemplate' -Description "Deploy ARM template to setup the virtual machines"  -UsecaseBlock `
         {        
@@ -776,7 +780,7 @@ while ($runCount -le $NumberOfIterations) {
 
     $canaryWindowsVMList = @()
 
-    Add-Usecase -Name 'QueryDeployedVMs' -Description "Queries for the VMs that were deployed using the ARM template" -Prereqs "ArmTemplates" -UsecaseBlock `
+    Add-Usecase -Name 'QueryDeployedVMs' -Description "Queries for the VMs that were deployed using the ARM template" -DependsOn "ArmTemplates" -UsecaseBlock `
     {
         $windowsVMList = @()        
         $vmList = Get-AzureRmVm -ResourceGroupName $CanaryVMRG -ErrorAction Stop
@@ -813,7 +817,7 @@ while ($runCount -le $NumberOfIterations) {
     [string]$privateVMName = ""
     [string]$privateVMIP = ""
 
-    Add-Action -Name "SelectVMInformation" -Prereqs "QueryTheVMsDeployed" -ActionBlock `
+    Add-Action -Name "SelectVMInformation" -DependsOn "QueryTheVMsDeployed" -ActionBlock `
     {
         if ($canaryWindowsVMList) {   
             $canaryWindowsVMList | Format-Table -AutoSize    
@@ -830,7 +834,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'CheckVMCommunicationPreVMReboot' -Description "Check if the VMs deployed can talk to each other before they are rebooted" -Prereqs "SelectVMInformation" -UsecaseBlock `
+    Add-Usecase -Name 'CheckVMCommunicationPreVMReboot' -Description "Check if the VMs deployed can talk to each other before they are rebooted" -DependsOn "SelectVMInformation" -UsecaseBlock `
     {
         $vmUser = ".\$VMAdminUserName"
         $secureCreds = New-Object System.Management.Automation.PSCredential $vmUser, (ConvertTo-SecureString $VMAdminUserPass -AsPlainText -Force)
@@ -898,7 +902,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'AddDatadiskToVMWithPrivateIP' -Description "Add a data disk from utilities resource group to the VM with private IP" -Prereqs "CheckVMCommunicationPreVMReboot" -UsecaseBlock `
+    Add-Usecase -Name 'AddDatadiskToVMWithPrivateIP' -Description "Add a data disk from utilities resource group to the VM with private IP" -DependsOn "CheckVMCommunicationPreVMReboot" -UsecaseBlock `
     {
         Invoke-Usecase -Name 'StopDeallocateVMWithPrivateIPBeforeAddingDatadisk' -Description "Stop/Deallocate the VM with private IP before adding the data disk" -UsecaseBlock `
         {
@@ -941,7 +945,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'ApplyDataDiskCheckCustomScriptExtensionToVMWithPrivateIP' -Description "Apply custom script that checks for the presence of data disk on the VM with private IP" -Prereqs "AddDatadiskToVMWithPrivateIP" -UsecaseBlock `
+    Add-Usecase -Name 'ApplyDataDiskCheckCustomScriptExtensionToVMWithPrivateIP' -Description "Apply custom script that checks for the presence of data disk on the VM with private IP" -DependsOn "AddDatadiskToVMWithPrivateIP" -UsecaseBlock `
     {
         Invoke-Usecase -Name 'CheckForExistingCustomScriptExtensionOnVMWithPrivateIP' -Description "Check for any existing custom script extensions on the VM with private IP" -UsecaseBlock `
         {
@@ -964,7 +968,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'RestartVMWithPublicIP' -Description "Restart the VM which has a public IP address" -Prereqs "ApplyDataDiskCheckCustomScriptExtensionToVMWithPrivateIP" -UsecaseBlock `
+    Add-Usecase -Name 'RestartVMWithPublicIP' -Description "Restart the VM which has a public IP address" -DependsOn "ApplyDataDiskCheckCustomScriptExtensionToVMWithPrivateIP" -UsecaseBlock `
     {
         if ($vmObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $publicVMName -ErrorAction Stop) {
             $restartVM = $vmObject | Restart-AzureRmVM -ErrorAction Stop
@@ -974,7 +978,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'StopDeallocateVMWithPrivateIP' -Description "Stop/Dellocate the VM with private IP" -Prereqs "ApplyCustomScriptExtensionToVMWithPrivateIP" -UsecaseBlock `
+    Add-Usecase -Name 'StopDeallocateVMWithPrivateIP' -Description "Stop/Dellocate the VM with private IP" -DependsOn "ApplyCustomScriptExtensionToVMWithPrivateIP" -UsecaseBlock `
     {
         if ($vmObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $privateVMName -ErrorAction Stop) {
             $stopVM = $vmObject | Stop-AzureRmVM -Force -ErrorAction Stop
@@ -991,7 +995,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'StartVMWithPrivateIP' -Description "Start the VM with private IP" -Prereqs "CreateAdminAzureStackEnv" -UsecaseBlock `
+    Add-Usecase -Name 'StartVMWithPrivateIP' -Description "Start the VM with private IP" -DependsOn "CreateAdminAzureStackEnv" -UsecaseBlock `
     {
         if ($vmObject = Get-AzureRmVM -ResourceGroupName $CanaryVMRG -Name $privateVMName -ErrorAction Stop) {
             $startVM = $vmObject | Start-AzureRmVM -ErrorAction Stop
@@ -1001,7 +1005,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'CheckVMCommunicationPostVMReboot' -Description "Check if the VMs deployed can talk to each other after they are rebooted" -Prereqs "StartVMWithPrivateIP", "RestartVMWithPublicIP" -UsecaseBlock `
+    Add-Usecase -Name 'CheckVMCommunicationPostVMReboot' -Description "Check if the VMs deployed can talk to each other after they are rebooted" -DependsOn "StartVMWithPrivateIP", "RestartVMWithPublicIP" -UsecaseBlock `
     {
         $vmUser = ".\$VMAdminUserName"
         $secureCreds = New-Object System.Management.Automation.PSCredential $vmUser, (ConvertTo-SecureString $VMAdminUserPass -AsPlainText -Force)
@@ -1065,7 +1069,7 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
     
-    Add-Usecase -Name 'CheckExistenceOfScreenShotForVMWithPrivateIP' -Description "Check if screen shots are available for Windows VM with private IP and store the screen shot in log folder" -Prereqs "StartVMWithPrivateIP" -UsecaseBlock `
+    Add-Usecase -Name 'CheckExistenceOfScreenShotForVMWithPrivateIP' -Description "Check if screen shots are available for Windows VM with private IP and store the screen shot in log folder" -DependsOn "StartVMWithPrivateIP" -UsecaseBlock `
     {
         $sa = Get-AzureRmStorageAccount -ResourceGroupName $CanaryVMRG -Name "$($CanaryVMRG)2sa"
         $diagSC = $sa | Get-AzureStorageContainer | Where-Object {$_.Name -like "bootdiagnostics-$CanaryVMRG*"}
@@ -1076,14 +1080,14 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
-    Add-Usecase -Name 'EnumerateAllResources' -Description "List out all the resources that have been deployed" -Prereqs "StartVMWithPrivateIP" -UsecaseBlock `
+    Add-Usecase -Name 'EnumerateAllResources' -Description "List out all the resources that have been deployed" -DependsOn "StartVMWithPrivateIP" -UsecaseBlock `
     {
         Get-AzureRmResource
     }
 
     if (-not $NoCleanup) {
 
-        Add-Action -Name "IfNoCleanup" -Prereqs "CreateTenantAzureStackEnv" -ActionBlock {
+        Add-Action -Name "IfNoCleanup" -DependsOn "CreateTenantAzureStackEnv" -ActionBlock {
         
             if (-not ($NoCleanupOnFailure -and (Get-CanaryFailureStatus))) {
                 Invoke-Usecase -Name 'DeleteVMWithPrivateIP' -Description "Delete the VM with private IP" -UsecaseBlock `
@@ -1146,16 +1150,12 @@ while ($runCount -le $NumberOfIterations) {
         }
     }
 
+    End-Scenario
+    $runCount += 1
+    if (-not $ListAvailable) {
+        Get-CanaryResult
+    }    
 
-    Add-Usecase -Name "Hi" -Description "I say hi" -Prereqs "", "", "" -UsecaseBlock `{
-
-}
-
-End-Scenario
-$runCount += 1
-if (-not $ListAvailable) {
-    Get-CanaryResult
-}    
 }
 
 if ($NumberOfIterations -gt 1) {

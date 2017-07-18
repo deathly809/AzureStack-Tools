@@ -1,3 +1,4 @@
+
 $Global:ContinueOnFailure = $false
 $Global:JSONLogFile = "Run-Canary.JSON"
 $Global:TxtLogFile = "AzureStackCanaryLog.Log"
@@ -5,22 +6,7 @@ $Global:wttLogFileName = ""
 $Global:listAvailableUsecases = $false
 $Global:exclusionList = @()
 
-
-# Locks
-$Global:mutex = New-Object System.Threading.Mutex
-$Global:countMutex = New-Object System.Threading.Mutex
-
-# "Name" -> { "DependsOnMe" , }
-$Global:Dependendents = @{}
-
-# "Name" -> { "I depend on" , }
-$Global:Prereqs = @{}
-
-# list of jobs to run when dependencies met
-$Global:Jobs = @{}
-
-# current list of jobs running
-$Global:RunningJobsCount = 0
+$Global:dryRun = $false
 
 
 if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1") {
@@ -31,6 +17,17 @@ if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1") {
 $CurrentUseCase = @{}
 [System.Collections.Stack] $UseCaseStack = New-Object System.Collections.Stack
 filter timestamp {"$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.ffff") $_"}
+
+function assert {
+    param(
+        [bool]$Assertion,
+        [string]$Message = ""
+    )
+    if (-not $Assertion) {
+        Write-Error "Assertion failed`n`t$Message"
+        exit
+    }
+}
 
 function Out-Log {
     param(
@@ -237,9 +234,11 @@ function Start-Scenario {
     if ($Global:wttLogFileName) {
         OpenWTTLogger $Global:wttLogFileName    
     }
+
     if ($ListAvailable) {
         $Global:listAvailableUsecases = $true
     }
+
     if ($ExclusionList) {
         $Global:exclusionList = $ExclusionList
     }
@@ -279,7 +278,9 @@ function Invoke-Action {
     Log-Info ("[START] Action: $Name`n") 
 
     try {
-        Invoke-Command -ScriptBlock $ActionBlock
+        if (-not $Global:dryRun) {
+            Invoke-Command -ScriptBlock $ActionBlock
+        }
     }
     catch [System.Exception] {        
         Log-Exception ($_.Exception)
@@ -310,7 +311,7 @@ function Invoke-UseCase {
         [ScriptBlock]$UsecaseBlock
     )
 
-    $success = $true
+    Log-Info "Invoke-Usecase: $Name"
 
     if ($Global:listAvailableUsecases) {
         $parentUsecase = $Name
@@ -321,28 +322,37 @@ function Invoke-UseCase {
             "`t" + $Name
         }
         if ($UsecaseBlock.ToString().Contains("Invoke-Usecase")) {
-            try { $success = Invoke-Command -ScriptBlock $UsecaseBlock -ErrorAction SilentlyContinue}
-            catch { $success = $false}
+            Invoke-Command -ScriptBlock $UsecaseBlock -ErrorAction SilentlyContinue
         }
-        return $success
+        return
     }
 
     if (($Global:exclusionList).Contains($Name)) {
         Log-Info ("Skipping Usecase: $Name")
         return
     }
+
     Log-Info ("[START] Usecase: $Name`n") 
     if ($Global:wttLogFileName) {
         StartTest "CanaryGate:$Name"
     }
 
     if ($Description) {
-        Log-Info ("[DESCRIPTION] $Description`n")        
+        Log-Info ("[DESCRIPTION] $Description`n")
     }
 
     try {
-        $result = Invoke-Command -ScriptBlock $UsecaseBlock
+        if ($Global:dryRun) {
+            $result = $true 
+        }
+        else {
+            $result = Invoke-Command -ScriptBlock $UsecaseBlock
+        }
+
         if ($result -and (-not $UsecaseBlock.ToString().Contains("Invoke-Usecase"))) {
+            Log-Info ($result)
+        }
+        else {
             Log-Info ($result)
         }
         if ($Global:wttLogFileName) {
@@ -360,6 +370,7 @@ function Invoke-UseCase {
         if ($Global:wttLogFileName) {
             EndTest "CanaryGate:$Name" $false
         }
+
         if (-not $Global:ContinueOnFailure) {
             throw $_.Exception
         }
@@ -957,7 +968,7 @@ function Enter-Lock {
         [ValidateNotNullOrEmpty()]
         [System.Threading.Mutex]$Mutex = $Global:mutex
     )
-    $Mutex.WaitOne()
+    $Mutex.WaitOne() | Out-Null
 }
 
 function Exit-lock {
@@ -965,7 +976,55 @@ function Exit-lock {
         [ValidateNotNullOrEmpty()]
         [System.Threading.Mutex]$Mutex = $Global:mutex
     )
-    $Mutex.ReleaseMutex()
+    $Mutex.ReleaseMutex() | Out-Null
+}
+
+function Remove-Dependency {
+    param(
+        [string]$JobName
+    )
+    try {
+        Enter-Lock
+        $deps = $Global:Dependendents[$JobName]
+        Out-Log "Dep: $deps"
+
+        foreach ( $dep in $deps) {
+
+            $preqs = $Global:DependsOn[$dep]
+            $preqs.Remove($JobName)
+            $Global:DependsOn[$dep] = $preqs
+
+            if ($preqs.Count -eq 0) {
+                Start-ParallelJob $dep
+            }
+        }
+    }
+    catch {
+        Out-Log "Updating dependents failed... $_"
+    }
+    finally {
+        Exit-lock
+    }
+}
+
+function Atomic-Decrement {
+    param(
+        [string]$Variable,
+        [System.Threading.Mutex]$Mutex
+    )
+    try {
+        Enter-Lock -Mutex $Mutex
+        $val = Get-Variable -Name Variable -ValueOnly
+        $val -= 1
+        Set-Variable -Name Variable -Value $val
+    }
+    catch {
+        Out-Log $_
+    }
+    finally {
+        Exit-Lock  -Mutex $Mutex
+    }
+
 }
 
 function Start-ParallelJob {
@@ -977,22 +1036,65 @@ function Start-ParallelJob {
 
     Out-Log "Starting job... $Name"
     
-    # signal we are running
-    Enter-Lock -Mutex $Global:countMutex
-    $val = $Global:RunningJobsCount
-    $Global:RunningJobsCount = $val + 1
-    Exit-Lock  -Mutex $Global:countMutex
+    [ScriptBlock]$wrapper = {
+        param(
+            [Parameter(Position = 0)]
+            [ValidateNotNullOrEmpty()]
+            [PSCustomObject]$Job
+        )
 
-    [ScriptBlock]$job = $Global:jobs[$Name]
-    Out-Log $job
+        [string]$JobName = $Job.Name
+        [ScriptBlock]$Script = $Job.Script
+        [PSCustomObject]$Data = $Job.Data
+
+        Enter-Lock
+        $Global:Scheduled.Remove($JobName)
+        $Global:Running.Add($JobName)
+        Exit-Lock
+
+        Write-Debug "Hello"
+        Write-Verbose "Hello"
+        Out-Log "Hello"
+        try {
+            Out-Log "Invoking for $JobName"
+            Invoke-Command $Script -ArgumentList $Data
+        }
+        catch {
+            Out-Log $_
+        }
+    
+        # decrement dependency counts for each dependent, if we reach 0
+        # then we can start the next job.
+        Out-Log "Removing dependencies for $JobName"
+        Remove-Dependency -JobName $JobName
+
+        # Signal that this job has completed
+        Out-Log "Removing $JobName"
+        
+        Enter-Lock
+        $Global:Running.Remove($JobName)
+        Exit-Lock
+
+        Out-Log "job finished... $JobName"
+    }
+
+    [PSCustomObject]$job = $Global:jobs[$Name]
     if ($job) {
-        Invoke-Command -ScriptBlock $job
+        try {
+            $jerb = Invoke-Command -JobName $Name -ScriptBlock $wrapper -ArgumentList $job -AsJob
+            Start-Sleep -s 2
+            Receive-Job $jerb
+        }
+        catch {
+            $fullError = $_.Exception
+            $error = "Could not invoke command: $fullError"
+            Out-Log $error
+            throw $error
+        }
     }
     else {
-        throw "job is null!"
+        Out-Log "job is null!"
     }
-    
-
 }
 
 # Run any parallel work
@@ -1002,30 +1104,33 @@ function Start-ParallelJobs {
     Out-Log "Start-ParallelJobs"
 
     # find jobs with no dependencies and schedule them
-    $jobsToSchedule = $()
     
     Enter-Lock
 
-    foreach ($key in $Global:Prereqs.Keys) {
-        $count = $Global:Prereqs[$key].Count
+    foreach ($key in $Global:DependsOn.Keys) {
+        $count = $Global:DependsOn[$key].Count
         if ($count -eq 0) {
-            $jobsToSchedule += $key
+            $Global:Scheduled.Add($key)
         }
     }
     Exit-Lock
     
-    # start parallel jobs
-    foreach ($job in $jobsToSchedule) {
-        Start-ParallelJob $job
-    }
+    
     
     # Wait for jobs to finish
-    [bool]$jobsRunning = ($Global:RunningJobsCount -gt 0)
-    while ($jobsRunning) {
-        Start-Sleep -m 100
-        Enter-Lock -Mutex $Global:countMutex
-        $jobsRunning = ($Global:RunningJobsCount -gt 0)
-        Exit-Lock -Mutex $Global:countMutex
+    [bool]$workToDo = ($Global:Scheduled.Count -gt 0)
+    while ($workToDo) {
+        Start-Sleep -m 100 | Out-Null
+
+        Enter-Lock
+        # start parallel jobs
+        foreach ($job in $Global:Scheduled) {
+            Out-Log $job
+            Start-ParallelJob $job
+        }
+
+        $workToDo = ($Global:Running.Count -gt 0) -or ($Global:Scheduled.Count -gt 0)
+        Exit-Lock
     }
 
     # Goes over each job that I scheduled, print out errors
@@ -1041,54 +1146,37 @@ function Add-Job {
 
         [parameter(Mandatory = $true, Position = 2)]
         [ValidateNotNullOrEmpty()]
-        [ScriptBlock]$Script,
+        [PSCustomObject]$Job,
         
         [parameter(Mandatory = $false, Position = 3)]
-        [string[]]$Prereqs = $null
+        [string[]]$DependsOn = $null
     )
 
     # Make sure shared data-structures cannot be trashed
     Enter-Lock
 
     Out-Log "Add-Job: $Name"
+
     try {
 
-        # Save prereqs
-        $Global:Prereqs.Add($Name, $Prereqs)
+        # Save DependsOn
+        $Global:DependsOn.Add($Name, {$DependsOn}.Invoke())
+        assert($DependsOn.Count -eq $Global:DependsOn[$Name].Count)
 
         # Add me as dependents of jobs I am required to wait on
-        foreach ($i in $Prereqs) {
+        foreach ($i in $DependsOn) {
             $arr = $Global:Dependendents[$i]
-            $Global:Dependendents[$i] = $arr + $Name
-        }
-    
-        $job = {
-            Out-Log "beginning job... $Name"
-
-            # run  it
-            Invoke-Command $Script
-    
-            # decrement dependency counts for each dependent, if we reach 0
-            # then we can start the next job.
-            Enter-Lock
-            foreach ( $dep in $Global:Dependendents) {
-                $preqs = $Global:Prereqs[$dep].Remove($Name)
-                $Global:Prereqs[$dep] = $preqs
-                if ($preqs.Count -eq 0) {
-                    Start-ParallelJob $dep
-                }
+            if (-not $arr) {
+                $arr = {$Name}.Invoke()
+                
             }
-            Exit-lock
-
-            # Signal that this job has completed
-            Enter-Lock -Mutex $Global:countMutex
-            $Global:RunningJobsCount -= 1
-            Exit-Lock  -Mutex $Global:countMutex
-
-            Out-Log "job finished... $Name"
+            else {
+                $arr.Add($Name)
+            }
+            $Global:Dependendents[$i] = $arr
         }
-        $Global:jobs.Add($Name, $job)
 
+        $Global:jobs.Add($Name, $Job) | Out-Null
     }
     catch {
         throw
@@ -1116,11 +1204,11 @@ A description of the usecase
 .PARAMETER UsecaseBlock
 The usecase script block
 
-.PARAMETER Prereqs
-A list of prerequisites for this use case
+.PARAMETER DependsOn
+A list of usecases this test depends on
 
 .EXAMPLE
-Add-UseCase -Name "CreateStorageAccount" -Description "Create a storage account" -Prereqs "CreateAzureStackEnvironment,CreateResourceGroup"
+Add-UseCase -Name "CreateStorageAccount" -Description "Create a storage account" -DependsOn "CreateAzureStackEnvironment,CreateResourceGroup"
 
 .NOTES
 
@@ -1141,9 +1229,29 @@ function Add-Usecase {
         [ScriptBlock]$UsecaseBlock,
         
         [parameter(Mandatory = $false, Position = 3)]
-        [string[]]$Prereqs = @()
+        [string[]]$DependsOn = @()
     )
-    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-UseCase -Name $Name -Description $Description -UsecaseBlock $UsecaseBlock } | Out-Null
+
+    [ScriptBlock]$script = {
+        param(
+            [PSCustomObject]$Data
+        )
+        Invoke-UseCase -Name $Data.Name -Description $Data.Description -UsecaseBlock $Data.UsecaseBlock
+    }
+
+    [PSCustomObject]$data = @{
+        Name         = $Name
+        Description  = $Description
+        UsecaseBlock = $UsecaseBlock
+    }
+
+    [PSCustomObject]$job = @{
+        Name   = $Name
+        Script = $script
+        Data   = $data
+    }
+
+    Add-Job -Name $Name -DependsOn $DependsOn -Job $job | Out-Null
 }
 
 <#
@@ -1161,8 +1269,8 @@ The name of the action
 .PARAMETER ActionBlock
 The script block that will be executed
 
-.PARAMETER Prereqs
-The list of prerequisited for this action.
+.PARAMETER DependsOn
+The list of dependencies for this action.
 
 .EXAMPLE
 Add-Action -Name "CreateAzureStackAdminEnvironment" -ActionBlock {
@@ -1194,8 +1302,27 @@ function Add-Action {
         [ScriptBlock]$ActionBlock,
         
         [parameter(Mandatory = $false, Position = 3)]
-        [string[]]$Prereqs = @()
+        [string[]]$DependsOn = @()
     )
-    Add-Job -Name $Name -Prereqs $Prereqs -Script { Invoke-Action -Name $Name -ActionBlock $ActionBlock } | Out-Null
+
+    [ScriptBlock]$script = {
+        param(
+            [PSCustomObject]$Data
+        )
+        Invoke-Action -Name $Data.Name -ActionBlock $Data.ActionBlock
+    }
+
+    [PSCustomObject]$data = @{
+        Name        = $Name
+        ActionBlock = $UsecaseBlock
+    }
+
+    [PSCustomObject]$job = @{
+        Name   = $Name
+        Script = $script
+        Data   = $data
+    }
+
+    Add-Job -Name $Name -DependsOn $DependsOn -Job $job | Out-Null
 }
 
