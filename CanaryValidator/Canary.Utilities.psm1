@@ -8,40 +8,6 @@ $Global:exclusionList = @()
 
 $Global:dryRun = $false
 
-# Locks
-$Global:mutex = New-Object System.Threading.Mutex
-$Global:countMutex = New-Object System.Threading.Mutex
-
-# "Name" -> { "DependsOnMe" , }
-$Global:Dependendents = @{}
-
-# "Name" -> { "I depend on" , }
-$Global:DependsOn = @{}
-
-# list of jobs to run when dependencies met
-$Global:Jobs = @{}
-
-# Scheduled to run
-$Global:Scheduled = {}.Invoke()
-# Currently running
-$Global:Running = {}.Invoke()
-
-# Finished running
-$Global:Finished = {}.Invoke()
-
-# The jobs have been handled
-$Global:Handled = {}.Invoke()
-
-
-if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1") {
-    Import-Module -Name "$PSScriptRoot\..\WTTLog.ps1" -Force
-    $Global:wttLogFileName = (Join-Path $PSScriptRoot "AzureStack_CanaryValidation_Test.wtl")    
-}
-
-$CurrentUseCase = @{}
-[System.Collections.Stack] $UseCaseStack = New-Object System.Collections.Stack
-filter timestamp {"$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.ffff") $_"}
-
 function assert {
     param(
         [bool]$Assertion,
@@ -52,6 +18,16 @@ function assert {
         exit
     }
 }
+
+if (Test-Path -Path "$PSScriptRoot\..\WTTLog.ps1") {
+    Import-Module -Name "$PSScriptRoot\..\WTTLog.ps1" -Force
+    $Global:wttLogFileName = (Join-Path $PSScriptRoot "AzureStack_CanaryValidation_Test.wtl")    
+}
+
+$CurrentUseCase = @{}
+[System.Collections.Stack] $UseCaseStack = New-Object System.Collections.Stack
+filter timestamp {"$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.ffff") $_"}
+
 
 function Out-Log {
     param(
@@ -987,21 +963,6 @@ function Invoke-RemoteScript {
 
 
 
-function Enter-Lock {
-    param(
-        [ValidateNotNullOrEmpty()]
-        [System.Threading.Mutex]$Mutex = $Global:mutex
-    )
-    $Mutex.WaitOne() | Out-Null
-}
-
-function Exit-lock {
-    param(
-        [ValidateNotNullOrEmpty()]
-        [System.Threading.Mutex]$Mutex = $Global:mutex
-    )
-    $Mutex.ReleaseMutex() | Out-Null
-}
 
 function Remove-Dependency {
     param(
